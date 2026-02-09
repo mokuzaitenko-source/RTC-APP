@@ -1,0 +1,90 @@
+{
+    "ok": true,
+    "generated_at": "<TS>",
+    "report": {
+        "run_id": "<RUN_ID>",
+        "run_type": "validate",
+        "status": "fail",
+        "started_at": "<TS>",
+        "ended_at": "<TS>",
+        "invariants": [
+            {
+                "id": "toolchain_ok",
+                "status": "fail",
+                "message": "Toolchain checks failed.",
+                "evidence": [
+                    {
+                        "kind": "summary",
+                        "ref": "exit_codes",
+                        "detail": "sync_exit_code=1, validate_exit_code=0",
+                        "hash": null
+                    }
+                ],
+                "recommended_action": "run_sync_or_validate",
+                "suggested_matches": []
+            },
+            {
+                "id": "parity",
+                "status": "pass",
+                "message": "RFC normative line count matches matrix core rows.",
+                "evidence": [
+                    {
+                        "kind": "file_line",
+                        "ref": "tests/fixtures/validators/v01_toolchain_fail_sync/rfc.md:L3",
+                        "detail": "This system MUST validate inputs.",
+                        "hash": "sha256:cf5043bd8267c7198fc8a53e8b6cb4b6a695bf62a309de51b1a7f6c9fc9dba74"
+                    },
+                    {
+                        "kind": "summary",
+                        "ref": "counts",
+                        "detail": "rfc=2, matrix=2",
+                        "hash": null
+                    }
+                ],
+                "recommended_action": "",
+                "suggested_matches": []
+            },
+            {
+                "id": "no_orphan_must",
+                "status": "pass",
+                "message": "All RFC MUST/SHALL lines map to core matrix rows.",
+                "evidence": [],
+                "recommended_action": "",
+                "suggested_matches": []
+            },
+            {
+                "id": "finding_integrity",
+                "status": "pass",
+                "message": "All gap/partial requirements have findings.",
+                "evidence": [],
+                "recommended_action": "",
+                "suggested_matches": []
+            },
+            {
+                "id": "backlink_consistency",
+                "status": "pass",
+                "message": "Matrix backlinks match playbook impacted requirements.",
+                "evidence": [],
+                "recommended_action": "",
+                "suggested_matches": []
+            },
+            {
+                "id": "blocker_pin",
+                "status": "pass",
+                "message": "Wave-1 blockers are present and marked in playbook.",
+                "evidence": [],
+                "recommended_action": "",
+                "suggested_matches": []
+            },
+            {
+                "id": "state_integrity",
+                "status": "pass",
+                "message": "App state references known findings and valid statuses.",
+                "evidence": [],
+                "recommended_action": "",
+                "suggested_matches": []
+            }
+        ],
+        "summary": "One or more invariants failed."
+    }
+}

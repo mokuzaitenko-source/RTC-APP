@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Oversight Ops Overview</title>
+  <link rel="icon" type="image/svg+xml" href="/app/favicon.svg">
+  <style>
+    :root {
+      --bg: #f4f6f3;
+      --panel: #ffffff;
+      --ink: #10202b;
+      --ink-soft: #455867;
+      --line: #cfd8d1;
+      --accent: #0f6d7a;
+      --radius: 14px;
+      --shadow: 0 10px 30px rgba(20, 30, 35, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+      background: linear-gradient(180deg, #f8faf8 0%, var(--bg) 100%);
+      color: var(--ink);
+      min-height: 100vh;
+    }
+
+    .wrap {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 18px 14px 24px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      padding: 14px;
+    }
+
+    h1, h2, h3, h4, p { margin: 0; }
+
+    .hero {
+      display: grid;
+      gap: 10px;
+      border-left: 5px solid var(--accent);
+    }
+
+    .hero p {
+      color: var(--ink-soft);
+      line-height: 1.45;
+    }
+
+    .cta-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 6px;
+    }
+
+    .cta-row a {
+      text-decoration: none;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      padding: 8px 12px;
+      color: var(--ink);
+      background: #fff;
+      font-weight: 700;
+      font-size: 0.9rem;
+    }
+
+    .cta-row a.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px;
+      background: #fff;
+      display: grid;
+      gap: 6px;
+    }
+
+    .card p {
+      color: var(--ink-soft);
+      font-size: 0.88rem;
+      line-height: 1.4;
+    }
+
+    .faq {
+      display: grid;
+      gap: 8px;
+    }
+
+    .faq details {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 8px 10px;
+      background: #fff;
+    }
+
+    .faq summary {
+      cursor: pointer;
+      font-weight: 700;
+    }
+
+    .faq p {
+      margin-top: 8px;
+      color: var(--ink-soft);
+      line-height: 1.4;
+      font-size: 0.88rem;
+    }
+
+    .feedback-note {
+      color: var(--ink-soft);
+      line-height: 1.45;
+    }
+
+    .tiny {
+      font-size: 0.8rem;
+      color: var(--ink-soft);
+    }
+
+    @media (max-width: 840px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <section class="panel hero">
+      <h1>Oversight Ops Control Room</h1>
+      <p>
+        This system turns vague work into executable operations with clear objective shaping,
+        deterministic validation loops, finding-state control, and export-ready status outputs.
+      </p>
+      <div class="cta-row">
+        <a class="primary" href="/app">Open Control Room</a>
+        <a href="#workflow">Read Workflow</a>
+      </div>
+    </section>
+
+    <section id="workflow" class="panel">
+      <h2>How The Workflow Operates</h2>
+      <p class="tiny">Use these phases in order for predictable, high-signal execution.</p>
+      <div class="grid" style="margin-top: 10px;">
+        <article class="card">
+          <h3>Phase 1: Define Objective</h3>
+          <p>Set goal, constraints, success criteria, and risk tolerance. Then generate a plan and verify the quality scorecard.</p>
+        </article>
+        <article class="card">
+          <h3>Phase 2: Validate State</h3>
+          <p>Run Session, Sync, and Validate to refresh invariants and coverage before touching blocker work.</p>
+        </article>
+        <article class="card">
+          <h3>Phase 3: Execute Queue</h3>
+          <p>Run top-tier actions, inspect linked findings, update legal state transitions, and export operational reports.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Frequently Asked Questions</h2>
+      <div class="faq" style="margin-top: 10px;">
+        <details open>
+          <summary>What is this app for?</summary>
+          <p>It is a deterministic operations console for managing sync, validation, blockers, finding transitions, and handoff outputs.</p>
+        </details>
+        <details>
+          <summary>How do I get value quickly?</summary>
+          <p>Start with a template, complete all objective fields, generate a plan, run session, and execute the first Tier-1 action.</p>
+        </details>
+        <details>
+          <summary>Where did feedback and long-form guidance move?</summary>
+          <p>They live on this overview page to keep `/app` focused on execution. Operational help remains available inside the Help dialog.</p>
+        </details>
+      </div>
+    </section>
+
+    <section class="panel">
+      <h2>Feedback</h2>
+      <p class="feedback-note">
+        Feedback collection is available on this overview route for planning iterations.
+        The `/app` route intentionally stays execution-only to reduce noise during active operations.
+      </p>
+    </section>
+  </main>
+</body>
+</html>

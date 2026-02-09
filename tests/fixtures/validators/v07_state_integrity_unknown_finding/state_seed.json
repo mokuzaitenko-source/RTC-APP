@@ -1,0 +1,13 @@
+{
+    "run_records": {
+        "sync_exit_code": 0,
+        "validate_exit_code": 0
+    },
+    "finding_states": [
+        {
+            "finding_id": "F-999",
+            "status": "blocked",
+            "note": "placeholder"
+        }
+    ]
+}
