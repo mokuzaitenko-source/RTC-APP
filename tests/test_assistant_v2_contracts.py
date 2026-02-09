@@ -49,6 +49,11 @@ class AssistantV2ContractTests(TestCase):
 		self.assertIsInstance(data.get("quality"), dict)
 		self.assertIsInstance(data.get("safety"), dict)
 		self.assertIsInstance(data.get("fallback"), dict)
+		self.assertIn(data.get("lane_used"), {"quick", "governed"})
+		self.assertIsInstance(data.get("complexity_reasons"), list)
+		self.assertIsInstance(data.get("pqs_overall"), (int, float))
+		self.assertIsInstance(data.get("fallback_level"), int)
+		self.assertIsInstance(data.get("assumptions"), list)
 
 	def test_respond_v2_trace_enabled_by_payload(self) -> None:
 		response = self.client.post(

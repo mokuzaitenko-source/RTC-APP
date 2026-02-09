@@ -41,6 +41,8 @@ class ApiContractsTests(TestCase):
 		self.assertTrue(payload["ok"])
 		assistant = payload["data"]["assistant"]
 		self.assertEqual(assistant["mode"], "clarify")
+		self.assertEqual(assistant["lane_used"], "governed")
+		self.assertIn("ambiguity_over_threshold", assistant["complexity_reasons"])
 		self.assertGreaterEqual(len(assistant["recommended_questions"]), 1)
 		self.assertLessEqual(len(assistant["recommended_questions"]), 2)
 		self.assertGreaterEqual(assistant["ambiguity_score"], 0.55)
@@ -59,10 +61,12 @@ class ApiContractsTests(TestCase):
 		self.assertTrue(payload["ok"])
 		assistant = payload["data"]["assistant"]
 		self.assertEqual(assistant["mode"], "plan_execute")
+		self.assertEqual(assistant["lane_used"], "quick")
 		self.assertGreaterEqual(len(assistant["plan"]), 4)
 		self.assertTrue(any("gate" in step.lower() for step in assistant["plan"]))
 		self.assertTrue(any("fallback" in step.lower() for step in assistant["plan"]))
 		self.assertEqual(assistant["quality"]["revision_required"], False)
+		self.assertTrue(str(assistant["candidate_response"]).startswith("Decision:"))
 
 	def test_assistant_models_endpoint_returns_catalog(self) -> None:
 		response = self.client.get("/api/assistant/models")
@@ -72,6 +76,9 @@ class ApiContractsTests(TestCase):
 		self.assertIn("models", payload["data"])
 		self.assertIn("default_model", payload["data"])
 		self.assertIn("provider_mode", payload["data"])
+		self.assertIn("effective_provider_mode", payload["data"])
+		self.assertIn("provider_ready", payload["data"])
+		self.assertIn("provider_warnings", payload["data"])
 		self.assertGreaterEqual(len(payload["data"]["models"]), 1)
 
 	def test_assistant_respond_v2_endpoint_contract(self) -> None:
@@ -91,6 +98,11 @@ class ApiContractsTests(TestCase):
 		self.assertEqual(data["session_id"], "api-contract-v2")
 		self.assertIn("module_outputs", data)
 		self.assertIn("M10", data["module_outputs"])
+		self.assertIn("lane_used", data)
+		self.assertIn("complexity_reasons", data)
+		self.assertIn("pqs_overall", data)
+		self.assertIn("fallback_level", data)
+		self.assertIn("assumptions", data)
 
 	def test_assistant_trace_header_adds_aca_trace(self) -> None:
 		response = self.client.post(
@@ -155,6 +167,45 @@ class ApiContractsTests(TestCase):
 		self.assertTrue(payload["ok"])
 		assistant = payload["data"]["assistant"]
 		self.assertEqual(assistant["provider_mode"], "local")
+
+	def test_assistant_respond_risk_sensitive_request_uses_governed_lane(self) -> None:
+		response = self.client.post(
+			"/api/assistant/respond",
+			json={
+				"user_input": "Design production auth and payment rollout with policy and legal safeguards.",
+				"risk_tolerance": "medium",
+			},
+		)
+		self.assertEqual(response.status_code, 200)
+		payload = response.json()
+		self.assertTrue(payload["ok"])
+		assistant = payload["data"]["assistant"]
+		self.assertEqual(assistant["lane_used"], "governed")
+		self.assertIn("risk_domain_signal", assistant["complexity_reasons"])
+
+	def test_assistant_respond_forced_quick_override_is_honored(self) -> None:
+		response = self.client.post(
+			"/api/assistant/respond",
+			json={"user_input": "quick only: build me a short execution summary"},
+		)
+		self.assertEqual(response.status_code, 200)
+		payload = response.json()
+		self.assertTrue(payload["ok"])
+		assistant = payload["data"]["assistant"]
+		self.assertEqual(assistant["lane_used"], "quick")
+		self.assertIn("forced_quick_only", assistant["complexity_reasons"])
+
+	def test_assistant_respond_forced_governed_override_is_honored(self) -> None:
+		response = self.client.post(
+			"/api/assistant/respond",
+			json={"user_input": "full governed: generate rollout plan"},
+		)
+		self.assertEqual(response.status_code, 200)
+		payload = response.json()
+		self.assertTrue(payload["ok"])
+		assistant = payload["data"]["assistant"]
+		self.assertEqual(assistant["lane_used"], "governed")
+		self.assertIn("forced_full_governed", assistant["complexity_reasons"])
 
 
 class PlaybookParserTests(TestCase):

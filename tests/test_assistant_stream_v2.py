@@ -68,6 +68,9 @@ class AssistantStreamV2Tests(TestCase):
 		done_data = next(data for name, data in events if name == "done")
 		self.assertEqual(done_data.get("aca_version"), "4.1")
 		self.assertIn("final_message", done_data)
+		self.assertIn(done_data.get("lane_used"), {"quick", "governed"})
+		self.assertIsInstance(done_data.get("complexity_reasons"), list)
+		self.assertIsInstance(done_data.get("pqs_overall"), (int, float))
 
 	def test_stream_v2_trace_events_when_enabled(self) -> None:
 		with self.client.stream(

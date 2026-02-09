@@ -72,6 +72,8 @@ class AssistantStreamTests(TestCase):
 		done_data = next(data for name, data in events if name == "done")
 		self.assertIn("assistant", done_data)
 		self.assertIn("mode", done_data["assistant"])
+		self.assertIn(done_data["assistant"].get("lane_used"), {"quick", "governed"})
+		self.assertIsInstance(done_data["assistant"].get("complexity_reasons"), list)
 
 	def test_stream_invalid_model_emits_error_event(self) -> None:
 		os.environ["ASSISTANT_PROVIDER_MODE"] = "local"

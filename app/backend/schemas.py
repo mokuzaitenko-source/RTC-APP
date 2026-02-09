@@ -82,6 +82,9 @@ class AssistantModelsData(BaseModel):
 	models: List[str] = Field(default_factory=list)
 	default_model: str
 	provider_mode: Literal["auto", "openai", "local"]
+	effective_provider_mode: Literal["openai", "local"]
+	provider_ready: bool = True
+	provider_warnings: List[str] = Field(default_factory=list)
 
 
 class ACATraceEvent(BaseModel):
@@ -107,4 +110,12 @@ class AssistantV2ResponseData(BaseModel):
 	quality: Dict[str, Any] = Field(default_factory=dict)
 	safety: Dict[str, Any] = Field(default_factory=dict)
 	fallback: Dict[str, Any] = Field(default_factory=dict)
+	lane_used: Literal["quick", "governed"] = "governed"
+	complexity_reasons: List[str] = Field(default_factory=list)
+	pqs_overall: float = 0.0
+	fallback_level: int = 0
+	assumptions: List[str] = Field(default_factory=list)
+	intake_frame: Dict[str, Any] = Field(default_factory=dict)
+	adaptive_defaults: Dict[str, Any] = Field(default_factory=dict)
+	adaptive_evolution: List[Dict[str, Any]] = Field(default_factory=list)
 	trace: Optional[List[ACATraceEvent]] = None

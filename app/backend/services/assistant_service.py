@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from collections import deque
+from dataclasses import dataclass, field
 import json
 import os
 import re
+from threading import Lock
 from typing import Any, Dict, Iterator, List, Literal, Tuple
 
 from app.backend.aca import ACAOrchestrator, ACAOrchestratorHooks, ACARequest
@@ -15,6 +18,10 @@ ProviderMode = Literal["auto", "openai", "local"]
 _DEFAULT_OPENAI_MODEL = "gpt-4.1-mini"
 _DEFAULT_OPENAI_TIMEOUT_S = 30.0
 _DEFAULT_STREAM_CHUNK_CHARS = 80
+_DEFAULT_AMBIGUITY_GOVERNED_THRESHOLD = 0.35
+_LOW_CONFIDENCE_THRESHOLD = 0.70
+_CORRECTION_PRESSURE_WINDOW = 6
+_CORRECTION_PRESSURE_THRESHOLD = 3
 
 _AMBIGUOUS_TOKENS = {
 	"thing",
@@ -46,6 +53,62 @@ _OBJECTIVE_VERBS = {
 }
 
 _RISK_TOKENS = {"auth", "payment", "security", "privacy", "legal", "medical", "finance", "production"}
+_GOVERNED_RISK_TOKENS = {
+	"auth",
+	"payment",
+	"security",
+	"privacy",
+	"policy",
+	"legal",
+	"medical",
+	"finance",
+	"production",
+	"prod",
+}
+_FRESHNESS_RETRIEVAL_TOKENS = {
+	"latest",
+	"current",
+	"today",
+	"now",
+	"news",
+	"release",
+	"version",
+	"pricing",
+	"search",
+	"browse",
+	"retrieve",
+	"source",
+	"sources",
+	"docs",
+	"web",
+}
+_MULTI_DECISION_TOKENS = {
+	"architecture",
+	"system",
+	"roadmap",
+	"migration",
+	"strategy",
+	"integrate",
+	"integration",
+	"fuse",
+	"fusion",
+}
+_CORRECTION_PRESSURE_TOKENS = {"wrong", "fix", "again", "failed", "issue", "bug", "not"}
+
+
+@dataclass
+class _AdaptiveSessionState:
+	ambiguity_threshold: float = _DEFAULT_AMBIGUITY_GOVERNED_THRESHOLD
+	checklist_version: int = 1
+	consecutive_governed_failures: int = 0
+	missing_decision_counts: Dict[str, int] = field(default_factory=dict)
+	correction_pressure_signals: deque[bool] = field(
+		default_factory=lambda: deque(maxlen=_CORRECTION_PRESSURE_WINDOW)
+	)
+
+
+_ADAPTIVE_SESSION_STATE: Dict[str, _AdaptiveSessionState] = {}
+_ADAPTIVE_SESSION_LOCK = Lock()
 
 _OPENAI_SYSTEM_PROMPT = """
 You are an oversight-integrated cognitive planning assistant.
@@ -111,6 +174,419 @@ def _ambiguity_score(user_input: str, context: str | None) -> Tuple[float, List[
 
 	score = max(0.0, min(1.0, score))
 	return round(score, 2), reasons
+
+
+def _combined_text(user_input: str, context: str | None) -> str:
+	parts = [user_input.strip()]
+	if isinstance(context, str) and context.strip():
+		parts.append(context.strip())
+	return "\n".join(part for part in parts if part)
+
+
+def _extract_prefixed_value(text: str, label: str) -> str:
+	pattern = re.compile(rf"(?im)^\s*{re.escape(label)}\s*:\s*(.+?)\s*$")
+	match = pattern.search(text)
+	if not match:
+		return ""
+	return " ".join(match.group(1).split()).strip()
+
+
+def _extract_constraints(text: str) -> List[str]:
+	prefixed = _extract_prefixed_value(text, "constraints")
+	constraints: List[str] = []
+	if prefixed:
+		for item in re.split(r"[;,|]", prefixed):
+			cleaned = " ".join(item.split()).strip()
+			if cleaned:
+				constraints.append(cleaned)
+	if constraints:
+		return constraints[:4]
+	lines = [line.strip() for line in text.splitlines() if line.strip()]
+	for line in lines:
+		lowered = line.lower()
+		if any(marker in lowered for marker in ["must", "should", "cannot", "deadline", "budget", "within"]):
+			constraints.append(" ".join(line.split()).strip())
+	if not constraints:
+		constraints.append("No explicit constraints provided; confirm constraints before irreversible changes.")
+	return list(dict.fromkeys(constraints))[:4]
+
+
+def _extract_deadline(text: str) -> str:
+	explicit = _extract_prefixed_value(text, "deadline")
+	if explicit:
+		return explicit
+	lowered = text.lower()
+	for marker in ["today", "tomorrow", "this week", "this month", "asap"]:
+		if marker in lowered:
+			return marker
+	match = re.search(r"\bby\s+([a-z0-9 ,/-]{3,40})", lowered)
+	if match:
+		return "by " + " ".join(match.group(1).split()).strip()
+	return "unspecified"
+
+
+def _extract_done_when(text: str, goal: str) -> str:
+	explicit = _extract_prefixed_value(text, "done-when")
+	if explicit:
+		return explicit
+	explicit = _extract_prefixed_value(text, "done when")
+	if explicit:
+		return explicit
+	if goal:
+		return f"A usable result is produced for: {goal}"
+	return "A clear decision, checks, and next step are provided."
+
+
+def _extract_intake_frame(
+	*,
+	user_input: str,
+	context: str | None,
+	risk_tolerance: RiskTolerance,
+) -> Dict[str, Any]:
+	combined = _combined_text(user_input, context)
+	goal = _extract_prefixed_value(combined, "goal")
+	if not goal:
+		goal = " ".join(user_input.split()).strip()
+	constraints = _extract_constraints(combined)
+	done_when = _extract_done_when(combined, goal)
+	risk = _extract_prefixed_value(combined, "risk").lower() or str(risk_tolerance)
+	if risk not in {"low", "medium", "high"}:
+		risk = str(risk_tolerance)
+	deadline = _extract_deadline(combined)
+	return {
+		"goal": goal,
+		"constraints": constraints,
+		"done_when": done_when,
+		"risk": risk,
+		"deadline": deadline,
+	}
+
+
+def _forced_lane_override(user_input: str, context: str | None) -> str | None:
+	combined = _combined_text(user_input, context).lower()
+	if any(flag in combined for flag in ["full governed", "governed only", "full governance"]):
+		return "governed"
+	if "quick only" in combined:
+		return "quick"
+	return None
+
+
+def _is_freshness_or_retrieval_dependent(tokens: List[str], text: str) -> bool:
+	if set(tokens) & _FRESHNESS_RETRIEVAL_TOKENS:
+		return True
+	lowered = text.lower()
+	return any(phrase in lowered for phrase in ["look up", "search for", "latest ", "current "])
+
+
+def _is_multi_decision_scope(tokens: List[str], text: str) -> bool:
+	if len(tokens) >= 28:
+		return True
+	if len(set(tokens) & _MULTI_DECISION_TOKENS) >= 2:
+		return True
+	lowered = text.lower()
+	if lowered.count(" and ") >= 3 and len(tokens) >= 24:
+		return True
+	return lowered.count(" then ") >= 2
+
+
+def _complexity_reasons(
+	*,
+	user_input: str,
+	context: str | None,
+	ambiguity_score: float,
+	ambiguity_threshold: float,
+) -> List[str]:
+	combined = _combined_text(user_input, context)
+	tokens = _tokenize(combined)
+	reasons: List[str] = []
+	if ambiguity_score > ambiguity_threshold:
+		reasons.append("ambiguity_over_threshold")
+	if set(tokens) & _GOVERNED_RISK_TOKENS:
+		reasons.append("risk_domain_signal")
+	if _is_freshness_or_retrieval_dependent(tokens, combined):
+		reasons.append("freshness_or_retrieval_required")
+	if _is_multi_decision_scope(tokens, combined):
+		reasons.append("multi_decision_scope")
+	return reasons
+
+
+def _estimate_confidence(result: Dict[str, object]) -> float:
+	quality = result.get("quality")
+	if isinstance(quality, dict):
+		overall = quality.get("overall")
+		if isinstance(overall, (int, float)):
+			return max(0.0, min(1.0, float(overall) / 10.0))
+	return 0.8
+
+
+def _adaptive_state_for_session(session_id: str | None) -> _AdaptiveSessionState:
+	key = session_id or "__global__"
+	with _ADAPTIVE_SESSION_LOCK:
+		state = _ADAPTIVE_SESSION_STATE.get(key)
+		if state is None:
+			state = _AdaptiveSessionState()
+			_ADAPTIVE_SESSION_STATE[key] = state
+		return state
+
+
+def _quick_contract_response(
+	*,
+	result: Dict[str, object],
+	intake_frame: Dict[str, Any],
+) -> str:
+	goal = str(intake_frame.get("goal") or "the requested outcome")
+	decision = f"Proceed with a focused implementation for: {goal}"
+	why = "Request is clear and low-risk, so quick lane is selected for fast progress."
+	checks = "Validate objective alignment and run one acceptance check before handoff."
+	next_step = "Execute the first smallest verifiable step and report outcome."
+	return (
+		f"Decision: {decision}\n"
+		f"Why: {why}\n"
+		"Checks:\n"
+		f"- {checks}\n"
+		f"Next step: {next_step}"
+	)
+
+
+def _governed_clarify_response(questions: List[str]) -> str:
+	lines = [
+		"Governed lane is active. I need clarification before execution:",
+	]
+	for idx, question in enumerate(questions, start=1):
+		lines.append(f"{idx}. {question}")
+	lines.append("Execution is paused until these decisions are confirmed.")
+	return "\n".join(lines)
+
+
+def _fallback_level_from_result(
+	*,
+	result: Dict[str, object],
+	state: _AdaptiveSessionState,
+	lane: str,
+	ambiguity_score: float,
+	ambiguity_threshold: float,
+) -> int:
+	fallback = result.get("fallback")
+	triggered = isinstance(fallback, dict) and bool(fallback.get("triggered"))
+	if not triggered:
+		if lane == "governed" and ambiguity_score > ambiguity_threshold:
+			return 1
+		return 0
+	reason_code = str(fallback.get("reason_code", "")) if isinstance(fallback, dict) else ""
+	if reason_code in {"prompt_injection_detected", "unsafe_output_detected"}:
+		return 4
+	return min(4, max(1, state.consecutive_governed_failures))
+
+
+def _apply_evolution_policy(
+	*,
+	state: _AdaptiveSessionState,
+	governed_failure: bool,
+	missing_decision_keys: List[str],
+	correction_pressure: bool,
+) -> List[Dict[str, str]]:
+	events: List[Dict[str, str]] = []
+	prev_failures = state.consecutive_governed_failures
+	prev_correction_count = sum(1 for signal in state.correction_pressure_signals if signal)
+	state.consecutive_governed_failures = prev_failures + 1 if governed_failure else 0
+
+	for key in missing_decision_keys:
+		previous = state.missing_decision_counts.get(key, 0)
+		current = previous + 1
+		state.missing_decision_counts[key] = current
+		if previous < 3 <= current:
+			state.checklist_version += 1
+			events.append(
+				{
+					"trigger": f"missing_decision_pattern_repeated:{key}",
+					"change": "Tighten intake checklist wording for missing decisions.",
+					"expected_effect": "Reduce repeated missing decision ambiguity before execution.",
+					"rollback_condition": "If clarification volume rises without quality gains for 10 turns.",
+				}
+			)
+
+	state.correction_pressure_signals.append(correction_pressure)
+	correction_count = sum(1 for signal in state.correction_pressure_signals if signal)
+
+	if prev_failures < 2 <= state.consecutive_governed_failures:
+		old_threshold = state.ambiguity_threshold
+		state.ambiguity_threshold = max(0.25, round(state.ambiguity_threshold - 0.02, 2))
+		events.append(
+			{
+				"trigger": "two_governed_failures_back_to_back",
+				"change": f"Lower ambiguity threshold from {old_threshold:.2f} to {state.ambiguity_threshold:.2f}.",
+				"expected_effect": "Escalate to governed handling earlier on underspecified requests.",
+				"rollback_condition": "If governed-lane volume increases >20% without PQS improvement.",
+			}
+		)
+
+	if prev_correction_count < _CORRECTION_PRESSURE_THRESHOLD <= correction_count:
+		old_threshold = state.ambiguity_threshold
+		state.ambiguity_threshold = max(0.25, round(state.ambiguity_threshold - 0.01, 2))
+		events.append(
+			{
+				"trigger": "high_user_correction_pressure",
+				"change": f"Lower ambiguity threshold from {old_threshold:.2f} to {state.ambiguity_threshold:.2f} and keep checklist version {state.checklist_version}.",
+				"expected_effect": "Catch unclear instructions earlier and reduce corrective rework.",
+				"rollback_condition": "If user correction pressure drops but cycle time increases materially.",
+			}
+		)
+
+	return events
+
+
+def _adaptive_defaults(state: _AdaptiveSessionState) -> Dict[str, Any]:
+	return {
+		"ambiguity_threshold": round(state.ambiguity_threshold, 2),
+		"checklist_version": state.checklist_version,
+		"default_risk_tolerance": "medium",
+	}
+
+
+def _apply_adaptive_protocol(
+	*,
+	result: Dict[str, object],
+	user_input: str,
+	context: str | None,
+	risk_tolerance: RiskTolerance,
+	max_questions: int,
+	session_id: str | None,
+) -> Dict[str, object]:
+	state = _adaptive_state_for_session(session_id)
+	intake_frame = _extract_intake_frame(
+		user_input=user_input,
+		context=context,
+		risk_tolerance=risk_tolerance,
+	)
+	local_ambiguity, ambiguity_notes = _ambiguity_score(user_input, context)
+	forced_lane = _forced_lane_override(user_input, context)
+	complexity_reasons = _complexity_reasons(
+		user_input=user_input,
+		context=context,
+		ambiguity_score=local_ambiguity,
+		ambiguity_threshold=state.ambiguity_threshold,
+	)
+	lane_used = "governed" if complexity_reasons else "quick"
+	if forced_lane == "governed":
+		lane_used = "governed"
+		complexity_reasons = ["forced_full_governed", *complexity_reasons]
+	elif forced_lane == "quick":
+		lane_used = "quick"
+		complexity_reasons = ["forced_quick_only"]
+	if not complexity_reasons:
+		complexity_reasons = ["default_quick_lane"]
+
+	quality = result.get("quality")
+	if not isinstance(quality, dict):
+		quality = {}
+		result["quality"] = quality
+	pqs_overall_raw = quality.get("overall", 8.0)
+	pqs_overall = float(pqs_overall_raw) if isinstance(pqs_overall_raw, (int, float)) else 8.0
+
+	assumptions = result.get("assumptions")
+	if not isinstance(assumptions, list):
+		assumptions = []
+	confidence = _estimate_confidence(result)
+	if lane_used == "governed":
+		if local_ambiguity > state.ambiguity_threshold and max_questions > 0:
+			questions = _clarifying_questions(user_input, max_questions)
+			result["mode"] = "clarify"
+			result["recommended_questions"] = questions[:max_questions]
+			result["plan"] = []
+			result["candidate_response"] = _governed_clarify_response(questions[:max_questions])
+		if confidence < _LOW_CONFIDENCE_THRESHOLD:
+			assumptions.append("Assumed constraints and environment remain valid until explicitly corrected.")
+		if "risk_domain_signal" in complexity_reasons:
+			assumptions.append("Assumed risk-sensitive operations require conservative safety handling.")
+		assumptions = list(dict.fromkeys(str(item).strip() for item in assumptions if str(item).strip()))
+		if assumptions:
+			result["assumptions"] = assumptions
+		if pqs_overall < 8.0:
+			current_iterations = result.get("iteration_count")
+			iterations = int(current_iterations) if isinstance(current_iterations, int) else 1
+			result["iteration_count"] = min(3, max(iterations, 2))
+	else:
+		result["mode"] = "plan_execute"
+		result["recommended_questions"] = []
+		result["candidate_response"] = _quick_contract_response(
+			result=result,
+			intake_frame=intake_frame,
+		)
+		result["checks"] = [
+			{
+				"name": "quick_validation",
+				"status": "pass",
+				"evidence": "Objective alignment and one acceptance check required before handoff.",
+				"severity": "medium",
+			}
+		]
+		result["assumptions"] = []
+
+	missing_decision_keys: List[str] = []
+	if "No explicit constraints provided" in " ".join(intake_frame.get("constraints", [])):
+		missing_decision_keys.append("constraints")
+	if intake_frame.get("deadline") == "unspecified":
+		missing_decision_keys.append("deadline")
+	if not intake_frame.get("done_when"):
+		missing_decision_keys.append("done_when")
+
+	combined_text = _combined_text(user_input, context).lower()
+	correction_pressure = any(token in combined_text for token in _CORRECTION_PRESSURE_TOKENS)
+	fallback = result.get("fallback")
+	fallback_triggered = isinstance(fallback, dict) and bool(fallback.get("triggered"))
+	governed_failure = lane_used == "governed" and (fallback_triggered or pqs_overall < 8.0)
+	evolution_events = _apply_evolution_policy(
+		state=state,
+		governed_failure=governed_failure,
+		missing_decision_keys=missing_decision_keys,
+		correction_pressure=correction_pressure,
+	)
+
+	fallback_level = _fallback_level_from_result(
+		result=result,
+		state=state,
+		lane=lane_used,
+		ambiguity_score=local_ambiguity,
+		ambiguity_threshold=state.ambiguity_threshold,
+	)
+	if not isinstance(fallback, dict):
+		fallback = {
+			"triggered": fallback_level > 0,
+			"reason_code": "none" if fallback_level == 0 else "governed_escalation",
+			"strategy": "none" if fallback_level == 0 else "clarify_and_narrow",
+			"notes": [],
+		}
+		result["fallback"] = fallback
+	fallback["level"] = fallback_level
+
+	if lane_used == "governed" and fallback_level >= 2:
+		candidate = str(result.get("candidate_response") or "").strip()
+		candidate = (
+			f"{candidate}\n\n"
+			"Constrained options:\n"
+			"1. Narrow to one concrete deliverable and proceed.\n"
+			"2. Confirm constraints and success criteria before execution.\n"
+			"Please choose option 1 or 2, or provide a tighter direction."
+		)
+		result["candidate_response"] = candidate
+
+	result["lane_used"] = lane_used
+	result["complexity_reasons"] = complexity_reasons
+	result["intake_frame"] = intake_frame
+	result["pqs_overall"] = round(pqs_overall, 2)
+	result["fallback_level"] = fallback_level
+	result["assumptions"] = result.get("assumptions", assumptions)
+	result["adaptive_defaults"] = _adaptive_defaults(state)
+	result["adaptive_evolution"] = evolution_events
+	result["complexity_test"] = {
+		"passed": lane_used == "quick" or not fallback_triggered,
+		"lane_selection_explicit": True,
+		"reasons": complexity_reasons,
+		"ambiguity_score": local_ambiguity,
+		"ambiguity_threshold": round(state.ambiguity_threshold, 2),
+		"notes": ambiguity_notes,
+	}
+	return result
 
 
 def _clarifying_questions(user_input: str, max_questions: int) -> List[str]:
@@ -343,10 +819,21 @@ def _resolve_model(requested_model: str | None) -> str:
 
 
 def list_models() -> Dict[str, object]:
+	configured_mode = _provider_mode()
+	effective_mode = _resolved_provider_mode(configured_mode)
+	openai_key_present = bool(os.getenv("OPENAI_API_KEY", "").strip())
+	provider_ready = True
+	warnings: List[str] = []
+	if configured_mode == "openai" and not openai_key_present:
+		provider_ready = False
+		warnings.append("OpenAI API key not configured. Set OPENAI_API_KEY.")
 	return {
 		"models": _openai_model_allowlist(),
 		"default_model": _openai_model_allowlist()[0],
-		"provider_mode": _provider_mode(),
+		"provider_mode": configured_mode,
+		"effective_provider_mode": effective_mode,
+		"provider_ready": provider_ready,
+		"provider_warnings": warnings,
 	}
 
 
@@ -948,6 +1435,25 @@ def _build_v2_payload(
 	fallback = result.get("fallback")
 	if not isinstance(fallback, dict):
 		fallback = {}
+	lane_used = str(result.get("lane_used") or "governed")
+	if lane_used not in {"quick", "governed"}:
+		lane_used = "governed"
+	complexity_reasons = result.get("complexity_reasons")
+	if not isinstance(complexity_reasons, list):
+		complexity_reasons = []
+	assumptions = result.get("assumptions")
+	if not isinstance(assumptions, list):
+		assumptions = []
+	pqs_overall_raw = result.get("pqs_overall")
+	if isinstance(pqs_overall_raw, (int, float)):
+		pqs_overall = round(float(pqs_overall_raw), 2)
+	else:
+		pqs_overall = round(float(quality.get("overall", 0.0)) if isinstance(quality.get("overall"), (int, float)) else 0.0, 2)
+	fallback_level_raw = result.get("fallback_level")
+	if isinstance(fallback_level_raw, int):
+		fallback_level = fallback_level_raw
+	else:
+		fallback_level = int(fallback.get("level", 0)) if isinstance(fallback.get("level"), int) else 0
 	payload: Dict[str, Any] = {
 		"aca_version": "4.1",
 		"session_id": session_id or "",
@@ -958,6 +1464,14 @@ def _build_v2_payload(
 		"quality": quality,
 		"safety": safety,
 		"fallback": fallback,
+		"lane_used": lane_used,
+		"complexity_reasons": complexity_reasons,
+		"pqs_overall": pqs_overall,
+		"fallback_level": fallback_level,
+		"assumptions": assumptions,
+		"intake_frame": result.get("intake_frame", {}),
+		"adaptive_defaults": result.get("adaptive_defaults", {}),
+		"adaptive_evolution": result.get("adaptive_evolution", []),
 	}
 	if trace_enabled:
 		payload["trace"] = trace
@@ -1006,6 +1520,14 @@ def respond_with_trace(
 		)
 		trace = []
 
+	result = _apply_adaptive_protocol(
+		result=result,
+		user_input=cleaned,
+		context=combined_context,
+		risk_tolerance=risk_tolerance,
+		max_questions=max_questions,
+		session_id=session_id,
+	)
 	_append_session_turns(session_id, cleaned, result)
 	return result, trace
 
@@ -1075,7 +1597,6 @@ def stream_respond(
 			session_id=session_id,
 			trace_enabled=trace_enabled,
 		)
-		deltas = _chunk_text(str(result.get("candidate_response", "")))
 		if trace_enabled:
 			for event in trace_events:
 				yield {"event": "trace", "data": event}
@@ -1087,9 +1608,8 @@ def stream_respond(
 				risk_tolerance=risk_tolerance,
 				max_questions=max_questions,
 			)
-			deltas = _chunk_text(str(result.get("candidate_response", "")))
 		else:
-			result, deltas = _openai_stream_response(
+			result, _deltas = _openai_stream_response(
 				user_input=cleaned,
 				context=combined_context,
 				risk_tolerance=risk_tolerance,
@@ -1098,6 +1618,15 @@ def stream_respond(
 				model=resolved_model,
 			)
 
+	result = _apply_adaptive_protocol(
+		result=result,
+		user_input=cleaned,
+		context=combined_context,
+		risk_tolerance=risk_tolerance,
+		max_questions=max_questions,
+		session_id=session_id,
+	)
+	deltas = _chunk_text(str(result.get("candidate_response", "")))
 	for delta in deltas:
 		yield {"event": "delta", "data": {"text": delta}}
 
@@ -1146,6 +1675,14 @@ def respond_v2_with_trace(
 		model=resolved_model,
 		session_id=session_id,
 		trace_enabled=trace_enabled,
+	)
+	result = _apply_adaptive_protocol(
+		result=result,
+		user_input=cleaned,
+		context=combined_context,
+		risk_tolerance=risk_tolerance,
+		max_questions=max_questions,
+		session_id=session_id,
 	)
 	result["model"] = resolved_model
 	result["provider_mode"] = effective_mode
@@ -1201,6 +1738,14 @@ def stream_v2(
 		model=resolved_model,
 		session_id=session_id,
 		trace_enabled=trace_enabled,
+	)
+	result = _apply_adaptive_protocol(
+		result=result,
+		user_input=cleaned,
+		context=combined_context,
+		risk_tolerance=risk_tolerance,
+		max_questions=max_questions,
+		session_id=session_id,
 	)
 	result["model"] = resolved_model
 	result["provider_mode"] = effective_mode
