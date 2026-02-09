@@ -237,7 +237,7 @@
 
     .compose-row {
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+      grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
       gap: 8px;
       align-items: end;
     }
@@ -264,6 +264,18 @@
       padding: 5px 10px;
       font-size: 0.75rem;
       font-weight: 700;
+    }
+
+    .chip.ok {
+      border-color: #97d5ad;
+      background: #eef8f1;
+      color: var(--ok);
+    }
+
+    .chip.warning {
+      border-color: #f2c189;
+      background: #fff3e6;
+      color: #8a4b00;
     }
 
     .trace-panel {
@@ -450,6 +462,7 @@
         </div>
         <div class="toolbar">
           <span id="assistantApiBadge" class="chip">API V1</span>
+          <span id="assistantProviderBadge" class="chip">Provider: --</span>
           <label class="chip" title="Show ACA module trace">
             <input id="chatTraceToggle" type="checkbox" />
             ACA Trace
@@ -485,6 +498,15 @@
             <select id="chatApiVersion">
               <option value="v1">v1</option>
               <option value="v2">v2</option>
+            </select>
+          </label>
+          <label for="chatFormatPreset">
+            Response Format
+            <select id="chatFormatPreset">
+              <option value="default">default</option>
+              <option value="concise_plan">concise plan</option>
+              <option value="implementation_brief">implementation brief</option>
+              <option value="debugging_checklist">debugging checklist</option>
             </select>
           </label>
           <div class="toolbar">

@@ -1,7 +1,7 @@
-# RTC-APP (Oversight Assistant)
+# RTC-APP
 
-Assistant-first web app built with FastAPI + vanilla JS.  
-It delivers streamed responses, session-aware memory, model selection, and deterministic fallback behavior for reliable planning workflows.
+Assistant-first full-stack app for practical planning and implementation guidance.
+It provides streaming chat, session-aware memory, model selection, ACA-governed safety/fallback behavior, and v1/v2 API compatibility.
 
 ## ACA Fusion Runtime
 
@@ -12,6 +12,13 @@ The assistant now runs through an internal ACA orchestrator pipeline (`M0-M23`) 
 - Feature flag switch:
   - `ASSISTANT_ACA_ENABLED=1` (default)
   - `ASSISTANT_ACA_ENABLED=0` (legacy path)
+
+## What This App Does
+
+- Turns plain-language goals into executable plans.
+- Streams responses in real time (SSE).
+- Keeps short-term server session context across refreshes.
+- Applies deterministic safety, integrity, and fallback checks before final output.
 
 ## Why This Project Is Strong
 
@@ -30,7 +37,7 @@ It includes API contracts, provider abstraction, streaming transport, memory con
 
 - Built an assistant-first FastAPI web app with SSE streaming, server-side session memory, and model selection, preserving backward API compatibility.
 - Designed a provider abstraction supporting local deterministic mode and OpenAI Responses API mode with controlled error envelopes and timeout handling.
-- Implemented contract/unit/integration tests for stream event sequencing, model allowlist enforcement, and compatibility paths (`54` tests passing).
+- Implemented contract/unit/integration tests for stream event sequencing, model allowlist enforcement, and compatibility paths.
 
 ## Run Locally
 
@@ -80,6 +87,9 @@ Returns:
 - `models`
 - `default_model`
 - `provider_mode`
+- `effective_provider_mode`
+- `provider_ready`
+- `provider_warnings`
 
 ## Session Handling
 
@@ -138,6 +148,7 @@ Canonical docs are stored in:
 - `docs/aca_v4/master_rulebook.md`
 - `docs/aca_v4/glossary.md`
 - `docs/aca_v4/modules/module_00_*.md ... module_23_*.md`
+- `docs/prompting_book.md`
 
 Build PDF docs:
 

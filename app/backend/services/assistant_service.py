@@ -2,11 +2,15 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 import json
 import os
 import re
+import time
 from threading import Lock
 from typing import Any, Dict, Iterator, List, Literal, Tuple
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from app.backend.aca import ACAOrchestrator, ACAOrchestratorHooks, ACARequest
 from app.backend.services import chat_session_service
@@ -96,6 +100,14 @@ _MULTI_DECISION_TOKENS = {
 _CORRECTION_PRESSURE_TOKENS = {"wrong", "fix", "again", "failed", "issue", "bug", "not"}
 
 
+def _adaptive_now() -> datetime:
+	return datetime.now(timezone.utc)
+
+
+def _adaptive_now_iso() -> str:
+	return _adaptive_now().isoformat().replace("+00:00", "Z")
+
+
 @dataclass
 class _AdaptiveSessionState:
 	ambiguity_threshold: float = _DEFAULT_AMBIGUITY_GOVERNED_THRESHOLD
@@ -105,10 +117,44 @@ class _AdaptiveSessionState:
 	correction_pressure_signals: deque[bool] = field(
 		default_factory=lambda: deque(maxlen=_CORRECTION_PRESSURE_WINDOW)
 	)
+	updated_at: str = field(default_factory=lambda: _adaptive_now_iso())
 
 
 _ADAPTIVE_SESSION_STATE: Dict[str, _AdaptiveSessionState] = {}
 _ADAPTIVE_SESSION_LOCK = Lock()
+
+
+def _adaptive_ttl_seconds() -> int:
+	try:
+		return chat_session_service.ttl_seconds()
+	except Exception:
+		return 6 * 60 * 60
+
+
+def _evict_adaptive_state_locked() -> None:
+	now = _adaptive_now()
+	ttl = timedelta(seconds=_adaptive_ttl_seconds())
+	expired: List[str] = []
+	for session_id, state in _ADAPTIVE_SESSION_STATE.items():
+		try:
+			updated = datetime.fromisoformat(state.updated_at.replace("Z", "+00:00"))
+		except ValueError:
+			expired.append(session_id)
+			continue
+		if now - updated > ttl:
+			expired.append(session_id)
+	for session_id in expired:
+		_ADAPTIVE_SESSION_STATE.pop(session_id, None)
+
+
+def _adaptive_state_for_session_locked(session_id: str | None) -> _AdaptiveSessionState:
+	_evict_adaptive_state_locked()
+	key = session_id or "__global__"
+	state = _ADAPTIVE_SESSION_STATE.get(key)
+	if state is None:
+		state = _AdaptiveSessionState(updated_at=_adaptive_now_iso())
+		_ADAPTIVE_SESSION_STATE[key] = state
+	return state
 
 _OPENAI_SYSTEM_PROMPT = """
 You are an oversight-integrated cognitive planning assistant.
@@ -140,6 +186,42 @@ class AssistantServiceError(Exception):
 		self.status_code = status_code
 		self.code = code
 		self.message = message
+
+
+class _AssistantQualityModel(BaseModel):
+	model_config = ConfigDict(extra="ignore")
+
+	clarity: float = 0.0
+	completeness: float = 0.0
+	safety: float = 0.0
+	format_compliance: float = 0.0
+	overall: float = 0.0
+	revision_required: bool = False
+
+
+class _AssistantNormalizedModel(BaseModel):
+	model_config = ConfigDict(extra="ignore")
+
+	mode: Literal["clarify", "plan_execute"]
+	ambiguity_score: float = 0.0
+	recommended_questions: List[str] = Field(default_factory=list)
+	plan: List[str] = Field(default_factory=list)
+	candidate_response: str = ""
+	quality: _AssistantQualityModel = Field(default_factory=_AssistantQualityModel)
+	iteration_count: int = 1
+	notes: List[str] = Field(default_factory=list)
+
+
+def _validate_normalized_payload(payload: Dict[str, Any]) -> Dict[str, object]:
+	try:
+		parsed = _AssistantNormalizedModel.model_validate(payload)
+	except ValidationError as exc:
+		raise AssistantServiceError(
+			status_code=502,
+			code="assistant_provider_error",
+			message="Assistant provider returned schema-incompatible content.",
+		) from exc
+	return parsed.model_dump()
 
 
 def _aca_enabled() -> bool:
@@ -320,13 +402,8 @@ def _estimate_confidence(result: Dict[str, object]) -> float:
 
 
 def _adaptive_state_for_session(session_id: str | None) -> _AdaptiveSessionState:
-	key = session_id or "__global__"
 	with _ADAPTIVE_SESSION_LOCK:
-		state = _ADAPTIVE_SESSION_STATE.get(key)
-		if state is None:
-			state = _AdaptiveSessionState()
-			_ADAPTIVE_SESSION_STATE[key] = state
-		return state
+		return _adaptive_state_for_session_locked(session_id)
 
 
 def _quick_contract_response(
@@ -452,141 +529,143 @@ def _apply_adaptive_protocol(
 	max_questions: int,
 	session_id: str | None,
 ) -> Dict[str, object]:
-	state = _adaptive_state_for_session(session_id)
-	intake_frame = _extract_intake_frame(
-		user_input=user_input,
-		context=context,
-		risk_tolerance=risk_tolerance,
-	)
-	local_ambiguity, ambiguity_notes = _ambiguity_score(user_input, context)
-	forced_lane = _forced_lane_override(user_input, context)
-	complexity_reasons = _complexity_reasons(
-		user_input=user_input,
-		context=context,
-		ambiguity_score=local_ambiguity,
-		ambiguity_threshold=state.ambiguity_threshold,
-	)
-	lane_used = "governed" if complexity_reasons else "quick"
-	if forced_lane == "governed":
-		lane_used = "governed"
-		complexity_reasons = ["forced_full_governed", *complexity_reasons]
-	elif forced_lane == "quick":
-		lane_used = "quick"
-		complexity_reasons = ["forced_quick_only"]
-	if not complexity_reasons:
-		complexity_reasons = ["default_quick_lane"]
+	with _ADAPTIVE_SESSION_LOCK:
+		state = _adaptive_state_for_session_locked(session_id)
+		state.updated_at = _adaptive_now_iso()
+		intake_frame = _extract_intake_frame(
+			user_input=user_input,
+			context=context,
+			risk_tolerance=risk_tolerance,
+		)
+		local_ambiguity, ambiguity_notes = _ambiguity_score(user_input, context)
+		forced_lane = _forced_lane_override(user_input, context)
+		complexity_reasons = _complexity_reasons(
+			user_input=user_input,
+			context=context,
+			ambiguity_score=local_ambiguity,
+			ambiguity_threshold=state.ambiguity_threshold,
+		)
+		lane_used = "governed" if complexity_reasons else "quick"
+		if forced_lane == "governed":
+			lane_used = "governed"
+			complexity_reasons = ["forced_full_governed", *complexity_reasons]
+		elif forced_lane == "quick":
+			lane_used = "quick"
+			complexity_reasons = ["forced_quick_only"]
+		if not complexity_reasons:
+			complexity_reasons = ["default_quick_lane"]
 
-	quality = result.get("quality")
-	if not isinstance(quality, dict):
-		quality = {}
-		result["quality"] = quality
-	pqs_overall_raw = quality.get("overall", 8.0)
-	pqs_overall = float(pqs_overall_raw) if isinstance(pqs_overall_raw, (int, float)) else 8.0
+		quality = result.get("quality")
+		if not isinstance(quality, dict):
+			quality = {}
+			result["quality"] = quality
+		pqs_overall_raw = quality.get("overall", 8.0)
+		pqs_overall = float(pqs_overall_raw) if isinstance(pqs_overall_raw, (int, float)) else 8.0
 
-	assumptions = result.get("assumptions")
-	if not isinstance(assumptions, list):
-		assumptions = []
-	confidence = _estimate_confidence(result)
-	if lane_used == "governed":
-		if local_ambiguity > state.ambiguity_threshold and max_questions > 0:
-			questions = _clarifying_questions(user_input, max_questions)
-			result["mode"] = "clarify"
-			result["recommended_questions"] = questions[:max_questions]
-			result["plan"] = []
-			result["candidate_response"] = _governed_clarify_response(questions[:max_questions])
-		if confidence < _LOW_CONFIDENCE_THRESHOLD:
-			assumptions.append("Assumed constraints and environment remain valid until explicitly corrected.")
-		if "risk_domain_signal" in complexity_reasons:
-			assumptions.append("Assumed risk-sensitive operations require conservative safety handling.")
-		assumptions = list(dict.fromkeys(str(item).strip() for item in assumptions if str(item).strip()))
-		if assumptions:
-			result["assumptions"] = assumptions
-		if pqs_overall < 8.0:
-			current_iterations = result.get("iteration_count")
-			iterations = int(current_iterations) if isinstance(current_iterations, int) else 1
-			result["iteration_count"] = min(3, max(iterations, 2))
-	else:
-		result["mode"] = "plan_execute"
-		result["recommended_questions"] = []
-		result["candidate_response"] = _quick_contract_response(
+		assumptions = result.get("assumptions")
+		if not isinstance(assumptions, list):
+			assumptions = []
+		confidence = _estimate_confidence(result)
+		if lane_used == "governed":
+			if local_ambiguity > state.ambiguity_threshold and max_questions > 0:
+				questions = _clarifying_questions(user_input, max_questions)
+				result["mode"] = "clarify"
+				result["recommended_questions"] = questions[:max_questions]
+				result["plan"] = []
+				result["candidate_response"] = _governed_clarify_response(questions[:max_questions])
+			if confidence < _LOW_CONFIDENCE_THRESHOLD:
+				assumptions.append("Assumed constraints and environment remain valid until explicitly corrected.")
+			if "risk_domain_signal" in complexity_reasons:
+				assumptions.append("Assumed risk-sensitive operations require conservative safety handling.")
+			assumptions = list(dict.fromkeys(str(item).strip() for item in assumptions if str(item).strip()))
+			if assumptions:
+				result["assumptions"] = assumptions
+			if pqs_overall < 8.0:
+				current_iterations = result.get("iteration_count")
+				iterations = int(current_iterations) if isinstance(current_iterations, int) else 1
+				result["iteration_count"] = min(3, max(iterations, 2))
+		else:
+			result["mode"] = "plan_execute"
+			result["recommended_questions"] = []
+			result["candidate_response"] = _quick_contract_response(
+				result=result,
+				intake_frame=intake_frame,
+			)
+			result["checks"] = [
+				{
+					"name": "quick_validation",
+					"status": "pass",
+					"evidence": "Objective alignment and one acceptance check required before handoff.",
+					"severity": "medium",
+				}
+			]
+			result["assumptions"] = []
+
+		missing_decision_keys: List[str] = []
+		if "No explicit constraints provided" in " ".join(intake_frame.get("constraints", [])):
+			missing_decision_keys.append("constraints")
+		if intake_frame.get("deadline") == "unspecified":
+			missing_decision_keys.append("deadline")
+		if not intake_frame.get("done_when"):
+			missing_decision_keys.append("done_when")
+
+		combined_text = _combined_text(user_input, context).lower()
+		correction_pressure = any(token in combined_text for token in _CORRECTION_PRESSURE_TOKENS)
+		fallback = result.get("fallback")
+		fallback_triggered = isinstance(fallback, dict) and bool(fallback.get("triggered"))
+		governed_failure = lane_used == "governed" and (fallback_triggered or pqs_overall < 8.0)
+		evolution_events = _apply_evolution_policy(
+			state=state,
+			governed_failure=governed_failure,
+			missing_decision_keys=missing_decision_keys,
+			correction_pressure=correction_pressure,
+		)
+
+		fallback_level = _fallback_level_from_result(
 			result=result,
-			intake_frame=intake_frame,
+			state=state,
+			lane=lane_used,
+			ambiguity_score=local_ambiguity,
+			ambiguity_threshold=state.ambiguity_threshold,
 		)
-		result["checks"] = [
-			{
-				"name": "quick_validation",
-				"status": "pass",
-				"evidence": "Objective alignment and one acceptance check required before handoff.",
-				"severity": "medium",
+		if not isinstance(fallback, dict):
+			fallback = {
+				"triggered": fallback_level > 0,
+				"reason_code": "none" if fallback_level == 0 else "governed_escalation",
+				"strategy": "none" if fallback_level == 0 else "clarify_and_narrow",
+				"notes": [],
 			}
-		]
-		result["assumptions"] = []
+			result["fallback"] = fallback
+		fallback["level"] = fallback_level
 
-	missing_decision_keys: List[str] = []
-	if "No explicit constraints provided" in " ".join(intake_frame.get("constraints", [])):
-		missing_decision_keys.append("constraints")
-	if intake_frame.get("deadline") == "unspecified":
-		missing_decision_keys.append("deadline")
-	if not intake_frame.get("done_when"):
-		missing_decision_keys.append("done_when")
+		if lane_used == "governed" and fallback_level >= 2:
+			candidate = str(result.get("candidate_response") or "").strip()
+			candidate = (
+				f"{candidate}\n\n"
+				"Constrained options:\n"
+				"1. Narrow to one concrete deliverable and proceed.\n"
+				"2. Confirm constraints and success criteria before execution.\n"
+				"Please choose option 1 or 2, or provide a tighter direction."
+			)
+			result["candidate_response"] = candidate
 
-	combined_text = _combined_text(user_input, context).lower()
-	correction_pressure = any(token in combined_text for token in _CORRECTION_PRESSURE_TOKENS)
-	fallback = result.get("fallback")
-	fallback_triggered = isinstance(fallback, dict) and bool(fallback.get("triggered"))
-	governed_failure = lane_used == "governed" and (fallback_triggered or pqs_overall < 8.0)
-	evolution_events = _apply_evolution_policy(
-		state=state,
-		governed_failure=governed_failure,
-		missing_decision_keys=missing_decision_keys,
-		correction_pressure=correction_pressure,
-	)
-
-	fallback_level = _fallback_level_from_result(
-		result=result,
-		state=state,
-		lane=lane_used,
-		ambiguity_score=local_ambiguity,
-		ambiguity_threshold=state.ambiguity_threshold,
-	)
-	if not isinstance(fallback, dict):
-		fallback = {
-			"triggered": fallback_level > 0,
-			"reason_code": "none" if fallback_level == 0 else "governed_escalation",
-			"strategy": "none" if fallback_level == 0 else "clarify_and_narrow",
-			"notes": [],
+		result["lane_used"] = lane_used
+		result["complexity_reasons"] = complexity_reasons
+		result["intake_frame"] = intake_frame
+		result["pqs_overall"] = round(pqs_overall, 2)
+		result["fallback_level"] = fallback_level
+		result["assumptions"] = result.get("assumptions", assumptions)
+		result["adaptive_defaults"] = _adaptive_defaults(state)
+		result["adaptive_evolution"] = evolution_events
+		result["complexity_test"] = {
+			"passed": lane_used == "quick" or not fallback_triggered,
+			"lane_selection_explicit": True,
+			"reasons": complexity_reasons,
+			"ambiguity_score": local_ambiguity,
+			"ambiguity_threshold": round(state.ambiguity_threshold, 2),
+			"notes": ambiguity_notes,
 		}
-		result["fallback"] = fallback
-	fallback["level"] = fallback_level
-
-	if lane_used == "governed" and fallback_level >= 2:
-		candidate = str(result.get("candidate_response") or "").strip()
-		candidate = (
-			f"{candidate}\n\n"
-			"Constrained options:\n"
-			"1. Narrow to one concrete deliverable and proceed.\n"
-			"2. Confirm constraints and success criteria before execution.\n"
-			"Please choose option 1 or 2, or provide a tighter direction."
-		)
-		result["candidate_response"] = candidate
-
-	result["lane_used"] = lane_used
-	result["complexity_reasons"] = complexity_reasons
-	result["intake_frame"] = intake_frame
-	result["pqs_overall"] = round(pqs_overall, 2)
-	result["fallback_level"] = fallback_level
-	result["assumptions"] = result.get("assumptions", assumptions)
-	result["adaptive_defaults"] = _adaptive_defaults(state)
-	result["adaptive_evolution"] = evolution_events
-	result["complexity_test"] = {
-		"passed": lane_used == "quick" or not fallback_triggered,
-		"lane_selection_explicit": True,
-		"reasons": complexity_reasons,
-		"ambiguity_score": local_ambiguity,
-		"ambiguity_threshold": round(state.ambiguity_threshold, 2),
-		"notes": ambiguity_notes,
-	}
-	return result
+		return result
 
 
 def _clarifying_questions(user_input: str, max_questions: int) -> List[str]:
@@ -987,7 +1066,7 @@ def _normalize_openai_payload(
 			user_input=user_input,
 			recommended_questions=questions,
 		)
-		return {
+		normalized = {
 			"mode": "clarify",
 			"ambiguity_score": local_ambiguity,
 			"recommended_questions": questions,
@@ -997,6 +1076,7 @@ def _normalize_openai_payload(
 			"iteration_count": 1,
 			"notes": notes,
 		}
+		return _validate_normalized_payload(normalized)
 
 	if not plan:
 		plan = _make_plan(user_input, context, risk_tolerance)
@@ -1030,7 +1110,7 @@ def _normalize_openai_payload(
 			recommended_questions=[],
 		)
 		iteration_count = 2
-	return {
+	normalized = {
 		"mode": "plan_execute",
 		"ambiguity_score": local_ambiguity,
 		"recommended_questions": [],
@@ -1040,6 +1120,7 @@ def _normalize_openai_payload(
 		"iteration_count": iteration_count,
 		"notes": notes,
 	}
+	return _validate_normalized_payload(normalized)
 
 
 def _session_context_text(session_id: str | None, max_turns: int | None = None) -> str:
@@ -1472,10 +1553,22 @@ def _build_v2_payload(
 		"intake_frame": result.get("intake_frame", {}),
 		"adaptive_defaults": result.get("adaptive_defaults", {}),
 		"adaptive_evolution": result.get("adaptive_evolution", []),
+		"runtime_metrics": result.get("runtime_metrics", {}),
 	}
 	if trace_enabled:
 		payload["trace"] = trace
 	return payload
+
+
+def _attach_runtime_metrics(result: Dict[str, object], started_at: float) -> None:
+	duration_ms = int((time.perf_counter() - started_at) * 1000)
+	fallback = result.get("fallback") if isinstance(result.get("fallback"), dict) else {}
+	result["runtime_metrics"] = {
+		"duration_ms": duration_ms,
+		"lane_used": str(result.get("lane_used") or "governed"),
+		"fallback_triggered": bool(fallback.get("triggered")) if isinstance(fallback, dict) else False,
+		"fallback_level": int(result.get("fallback_level") or 0) if isinstance(result.get("fallback_level"), int) else 0,
+	}
 
 
 def respond_with_trace(
@@ -1488,6 +1581,7 @@ def respond_with_trace(
 	session_id: str | None = None,
 	trace_enabled: bool = False,
 ) -> Tuple[Dict[str, object], List[dict]]:
+	started_at = time.perf_counter()
 	cleaned = " ".join(user_input.split())
 	if not cleaned:
 		raise ValueError("user_input must not be empty.")
@@ -1528,6 +1622,7 @@ def respond_with_trace(
 		max_questions=max_questions,
 		session_id=session_id,
 	)
+	_attach_runtime_metrics(result, started_at)
 	_append_session_turns(session_id, cleaned, result)
 	return result, trace
 
@@ -1563,6 +1658,7 @@ def stream_respond(
 	session_id: str | None = None,
 	trace_enabled: bool = False,
 ) -> Iterator[Dict[str, Any]]:
+	started_at = time.perf_counter()
 	cleaned = " ".join(user_input.split())
 	if not cleaned:
 		raise ValueError("user_input must not be empty.")
@@ -1626,6 +1722,7 @@ def stream_respond(
 		max_questions=max_questions,
 		session_id=session_id,
 	)
+	_attach_runtime_metrics(result, started_at)
 	deltas = _chunk_text(str(result.get("candidate_response", "")))
 	for delta in deltas:
 		yield {"event": "delta", "data": {"text": delta}}
@@ -1656,6 +1753,7 @@ def respond_v2_with_trace(
 	session_id: str | None = None,
 	trace_enabled: bool = False,
 ) -> Tuple[Dict[str, Any], List[dict]]:
+	started_at = time.perf_counter()
 	cleaned = " ".join(user_input.split())
 	if not cleaned:
 		raise ValueError("user_input must not be empty.")
@@ -1684,6 +1782,7 @@ def respond_v2_with_trace(
 		max_questions=max_questions,
 		session_id=session_id,
 	)
+	_attach_runtime_metrics(result, started_at)
 	result["model"] = resolved_model
 	result["provider_mode"] = effective_mode
 	v2 = _build_v2_payload(
@@ -1706,6 +1805,7 @@ def stream_v2(
 	session_id: str | None = None,
 	trace_enabled: bool = False,
 ) -> Iterator[Dict[str, Any]]:
+	started_at = time.perf_counter()
 	cleaned = " ".join(user_input.split())
 	if not cleaned:
 		raise ValueError("user_input must not be empty.")
@@ -1747,6 +1847,7 @@ def stream_v2(
 		max_questions=max_questions,
 		session_id=session_id,
 	)
+	_attach_runtime_metrics(result, started_at)
 	result["model"] = resolved_model
 	result["provider_mode"] = effective_mode
 

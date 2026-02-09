@@ -21,10 +21,17 @@ const state = {
     pending: "",
     risk_tolerance: "medium",
     api_version: "v1",
+    output_format: "default",
     model: "",
     models: [],
     aca_trace_enabled: false,
-    last_trace: []
+    last_trace: [],
+    provider_status: {
+      provider_mode: "",
+      effective_provider_mode: "",
+      provider_ready: true,
+      provider_warnings: []
+    }
   },
   help: {
     checklist_progress: {},
@@ -55,6 +62,27 @@ function renderApiVersionUi() {
   const select = document.getElementById("chatApiVersion");
   if (select) {
     select.value = state.chat.api_version;
+  }
+}
+
+function renderProviderStatus() {
+  const badge = document.getElementById("assistantProviderBadge");
+  if (!badge) {
+    return;
+  }
+  const status = state.chat.provider_status || {};
+  const configured = String(status.provider_mode || "").trim();
+  const effective = String(status.effective_provider_mode || configured || "unknown").trim();
+  const ready = status.provider_ready !== false;
+  const warnings = Array.isArray(status.provider_warnings) ? status.provider_warnings : [];
+  const label = configured && configured !== effective ? `${effective} (${configured})` : effective;
+  badge.textContent = `Provider: ${label || "unknown"}`;
+  badge.classList.toggle("warning", !ready);
+  badge.classList.toggle("ok", ready);
+  if (!ready && warnings.length) {
+    badge.title = warnings.join(" ");
+  } else {
+    badge.removeAttribute("title");
   }
 }
 
@@ -113,6 +141,14 @@ function loadState() {
       state.chat.api_version = ["v1", "v2"].includes(parsed.chat.api_version)
         ? parsed.chat.api_version
         : "v1";
+      state.chat.output_format = [
+        "default",
+        "concise_plan",
+        "implementation_brief",
+        "debugging_checklist"
+      ].includes(parsed.chat.output_format)
+        ? parsed.chat.output_format
+        : "default";
       state.chat.model = typeof parsed.chat.model === "string" ? parsed.chat.model : "";
       state.chat.aca_trace_enabled = Boolean(parsed.chat.aca_trace_enabled);
       state.chat.last_trace = Array.isArray(parsed.chat.last_trace) ? parsed.chat.last_trace : [];
@@ -131,6 +167,7 @@ function loadState() {
     state.chat.messages = [];
     state.chat.risk_tolerance = "medium";
     state.chat.api_version = "v1";
+    state.chat.output_format = "default";
     state.chat.model = "";
     state.chat.aca_trace_enabled = false;
     state.chat.last_trace = [];
@@ -149,6 +186,7 @@ function persistState() {
       messages: state.chat.messages,
       risk_tolerance: state.chat.risk_tolerance,
       api_version: state.chat.api_version,
+      output_format: state.chat.output_format,
       model: state.chat.model,
       aca_trace_enabled: state.chat.aca_trace_enabled,
       last_trace: state.chat.last_trace
@@ -238,6 +276,10 @@ function renderChat() {
   if (traceToggle) {
     traceToggle.checked = Boolean(state.chat.aca_trace_enabled);
   }
+  const formatPreset = document.getElementById("chatFormatPreset");
+  if (formatPreset) {
+    formatPreset.value = state.chat.output_format;
+  }
   renderApiVersionUi();
 }
 
@@ -308,6 +350,19 @@ function recentContextText(limit = 12) {
     return "";
   }
   return turns.map(turn => `${turn.role}: ${turn.text}`).join("\n");
+}
+
+function presetInstruction() {
+  if (state.chat.output_format === "concise_plan") {
+    return "Return a concise 5-step plan with one acceptance check per step.";
+  }
+  if (state.chat.output_format === "implementation_brief") {
+    return "Return an implementation brief with scope, milestones, risks, and tests.";
+  }
+  if (state.chat.output_format === "debugging_checklist") {
+    return "Return a debugging checklist with hypotheses, checks, and expected signals.";
+  }
+  return "";
 }
 
 function isV2AssistantPayload(payload) {
@@ -397,14 +452,23 @@ async function loadModels() {
   if (state.chat.model && !models.includes(state.chat.model) && models.length) {
     state.chat.model = models[0];
   }
+  state.chat.provider_status = {
+    provider_mode: String(data.provider_mode || "").trim(),
+    effective_provider_mode: String(data.effective_provider_mode || "").trim(),
+    provider_ready: data.provider_ready !== false,
+    provider_warnings: Array.isArray(data.provider_warnings) ? data.provider_warnings : []
+  };
   persistState();
   applyModelOptions();
+  renderProviderStatus();
 }
 
 function buildRequestPayload(prompt) {
   const context = recentContextText();
+  const formatHint = presetInstruction();
+  const userInput = formatHint ? `${prompt}\n\nOutput format requirement: ${formatHint}` : prompt;
   const payload = {
-    user_input: prompt,
+    user_input: userInput,
     context,
     risk_tolerance: state.chat.risk_tolerance,
     max_questions: 2,
@@ -414,6 +478,21 @@ function buildRequestPayload(prompt) {
     payload.trace = Boolean(state.chat.aca_trace_enabled);
   }
   return payload;
+}
+
+function findSseBoundary(buffer) {
+  const crlf = buffer.indexOf("\r\n\r\n");
+  const lf = buffer.indexOf("\n\n");
+  if (crlf === -1) {
+    return { index: lf, length: 2 };
+  }
+  if (lf === -1) {
+    return { index: crlf, length: 4 };
+  }
+  if (crlf < lf) {
+    return { index: crlf, length: 4 };
+  }
+  return { index: lf, length: 2 };
 }
 
 function parseSseFrame(rawFrame) {
@@ -506,12 +585,12 @@ async function runStream(payload) {
     }
     buffer += decoder.decode(value, { stream: true });
     while (true) {
-      const boundary = buffer.indexOf("\n\n");
-      if (boundary === -1) {
+      const boundary = findSseBoundary(buffer);
+      if (boundary.index === -1) {
         break;
       }
-      const frame = buffer.slice(0, boundary);
-      buffer = buffer.slice(boundary + 2);
+      const frame = buffer.slice(0, boundary.index);
+      buffer = buffer.slice(boundary.index + boundary.length);
       const parsed = parseSseFrame(frame);
       if (!parsed) {
         continue;
@@ -567,7 +646,7 @@ async function runStream(payload) {
   }
 
   if (!donePayload) {
-    throw new Error("Assistant stream ended without done event.");
+    throw new Error("Assistant stream ended without done event. Falling back to non-stream response.");
   }
 
   const sessionId = useV2 ? donePayload?.session_id : donePayload?.session_id;
@@ -612,7 +691,8 @@ async function askAssistant() {
   let assistant = null;
   try {
     assistant = await runStream(payload);
-  } catch (_streamError) {
+  } catch (streamError) {
+    setStatus(`Streaming degraded: ${streamError.message}`);
     assistant = await runFallbackRespond(payload);
   }
 
@@ -888,6 +968,17 @@ function wire() {
       state.chat.api_version = apiVersion.value === "v2" ? "v2" : "v1";
       persistState();
       renderApiVersionUi();
+    });
+  }
+
+  const formatPreset = document.getElementById("chatFormatPreset");
+  if (formatPreset) {
+    formatPreset.addEventListener("change", () => {
+      const allowed = ["default", "concise_plan", "implementation_brief", "debugging_checklist"];
+      state.chat.output_format = allowed.includes(formatPreset.value)
+        ? formatPreset.value
+        : "default";
+      persistState();
     });
   }
 
