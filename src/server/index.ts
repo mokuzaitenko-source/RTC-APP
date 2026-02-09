@@ -26,7 +26,8 @@ io.on('connection', (socket) => {
     if (!rooms.has(roomId)) {
       rooms.set(roomId, new Set());
     }
-    rooms.get(roomId)?.add(socket.id);
+    const room = rooms.get(roomId)!;
+    room.add(socket.id);
     
     // Join the socket.io room
     socket.join(roomId);
@@ -35,7 +36,7 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('user-joined', socket.id);
     
     // Send list of existing users to the new user
-    const existingUsers = Array.from(rooms.get(roomId) || []).filter(id => id !== socket.id);
+    const existingUsers = Array.from(room).filter(id => id !== socket.id);
     socket.emit('existing-users', existingUsers);
   });
 
@@ -64,6 +65,28 @@ io.on('connection', (socket) => {
       candidate: data.candidate,
       from: socket.id
     });
+  });
+
+  // Handle leaving a room
+  socket.on('leave-room', (roomId: string) => {
+    console.log(`User ${socket.id} leaving room ${roomId}`);
+    
+    // Remove user from room
+    const room = rooms.get(roomId);
+    if (room) {
+      room.delete(socket.id);
+      
+      // Notify other users in the room
+      socket.to(roomId).emit('user-left', socket.id);
+      
+      // Leave the socket.io room
+      socket.leave(roomId);
+      
+      // Clean up empty rooms
+      if (room.size === 0) {
+        rooms.delete(roomId);
+      }
+    }
   });
 
   // Handle disconnection

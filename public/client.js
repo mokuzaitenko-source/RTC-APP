@@ -213,6 +213,11 @@ async function joinRoom() {
 
 // Leave room
 function leaveRoom() {
+  // Notify server to leave the room
+  if (currentRoom && socket) {
+    socket.emit('leave-room', currentRoom);
+  }
+
   // Close all peer connections
   peerConnections.forEach((pc, peerId) => {
     removePeer(peerId);
@@ -223,12 +228,6 @@ function leaveRoom() {
     localStream.getTracks().forEach(track => track.stop());
     localVideo.srcObject = null;
     localStream = null;
-  }
-
-  // Disconnect from socket room (will trigger server-side cleanup)
-  if (socket) {
-    socket.disconnect();
-    socket.connect();
   }
 
   // Reset UI
