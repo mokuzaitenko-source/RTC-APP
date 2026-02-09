@@ -74,6 +74,37 @@ class ApiContractsTests(TestCase):
 		self.assertIn("provider_mode", payload["data"])
 		self.assertGreaterEqual(len(payload["data"]["models"]), 1)
 
+	def test_assistant_respond_v2_endpoint_contract(self) -> None:
+		response = self.client.post(
+			"/api/assistant/respond-v2",
+			headers={"X-Session-ID": "api-contract-v2"},
+			json={
+				"user_input": "Build a practical implementation plan with fallback behavior.",
+				"model": "gpt-4.1-mini",
+			},
+		)
+		self.assertEqual(response.status_code, 200)
+		payload = response.json()
+		self.assertTrue(payload["ok"])
+		data = payload["data"]
+		self.assertEqual(data["aca_version"], "4.1")
+		self.assertEqual(data["session_id"], "api-contract-v2")
+		self.assertIn("module_outputs", data)
+		self.assertIn("M10", data["module_outputs"])
+
+	def test_assistant_trace_header_adds_aca_trace(self) -> None:
+		response = self.client.post(
+			"/api/assistant/respond",
+			headers={"X-ACA-Trace": "1"},
+			json={"user_input": "Build a practical milestone plan."},
+		)
+		self.assertEqual(response.status_code, 200)
+		payload = response.json()
+		self.assertTrue(payload["ok"])
+		self.assertIn("aca_trace", payload["data"])
+		self.assertIsInstance(payload["data"]["aca_trace"], list)
+		self.assertGreaterEqual(len(payload["data"]["aca_trace"]), 24)
+
 	def test_app_shell_is_assistant_only(self) -> None:
 		response = self.client.get("/app")
 		self.assertEqual(response.status_code, 200)
@@ -99,7 +130,7 @@ class ApiContractsTests(TestCase):
 		self.assertIn("Open Control Room", body)
 		self.assertIn('href="/app"', body)
 
-	def test_assistant_respond_auto_mode_without_openai_key_returns_503(self) -> None:
+	def test_assistant_respond_auto_mode_without_openai_key_falls_back_to_local(self) -> None:
 		previous_mode = os.environ.get("ASSISTANT_PROVIDER_MODE")
 		previous_key = os.environ.get("OPENAI_API_KEY")
 		try:
@@ -119,10 +150,11 @@ class ApiContractsTests(TestCase):
 			else:
 				os.environ["OPENAI_API_KEY"] = previous_key
 
-		self.assertEqual(response.status_code, 503)
+		self.assertEqual(response.status_code, 200)
 		payload = response.json()
-		self.assertFalse(payload["ok"])
-		self.assertEqual(payload["error"]["code"], "assistant_provider_unconfigured")
+		self.assertTrue(payload["ok"])
+		assistant = payload["data"]["assistant"]
+		self.assertEqual(assistant["provider_mode"], "local")
 
 
 class PlaybookParserTests(TestCase):

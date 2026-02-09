@@ -5,6 +5,7 @@ import os
 import re
 from typing import Any, Dict, Iterator, List, Literal, Tuple
 
+from app.backend.aca import ACAOrchestrator, ACAOrchestratorHooks, ACARequest
 from app.backend.services import chat_session_service
 
 
@@ -76,6 +77,11 @@ class AssistantServiceError(Exception):
 		self.status_code = status_code
 		self.code = code
 		self.message = message
+
+
+def _aca_enabled() -> bool:
+	value = os.getenv("ASSISTANT_ACA_ENABLED", "1").strip().lower()
+	return value not in {"0", "false", "off", "no"}
 
 
 def _tokenize(text: str) -> List[str]:
@@ -268,6 +274,15 @@ def _provider_mode() -> ProviderMode:
 			message="ASSISTANT_PROVIDER_MODE must be one of: auto, openai, local.",
 		)
 	return mode  # type: ignore[return-value]
+
+
+def _resolved_provider_mode(configured_mode: ProviderMode) -> ProviderMode:
+	if configured_mode == "local":
+		return "local"
+	if configured_mode == "openai":
+		return "openai"
+	has_openai_key = bool(os.getenv("OPENAI_API_KEY", "").strip())
+	return "openai" if has_openai_key else "local"
 
 
 def _openai_timeout() -> float:
@@ -566,7 +581,7 @@ def _append_session_turns(session_id: str | None, user_input: str, result: Dict[
 	if not session_id:
 		return
 	chat_session_service.append_turn(session_id, "user", user_input)
-	assistant_text = str(result.get("candidate_response", "")).strip()
+	assistant_text = str(result.get("candidate_response") or result.get("final_message") or "").strip()
 	if not assistant_text:
 		assistant_text = "No assistant output was returned."
 	chat_session_service.append_turn(session_id, "assistant", assistant_text)
@@ -853,6 +868,148 @@ def _build_result(
 	return result
 
 
+def _run_aca_pipeline(
+	*,
+	user_input: str,
+	context: str | None,
+	risk_tolerance: RiskTolerance,
+	max_questions: int,
+	mode: ProviderMode,
+	model: str,
+	session_id: str | None,
+	trace_enabled: bool,
+) -> Tuple[Dict[str, object], List[dict]]:
+	orchestrator = ACAOrchestrator(
+		ACAOrchestratorHooks(
+			build_result=_build_result,
+		)
+	)
+	request = ACARequest(
+		user_input=user_input,
+		context=context,
+		risk_tolerance=risk_tolerance,
+		max_questions=max_questions,
+		model=model,
+		provider_mode=mode,
+		session_id=session_id,
+		trace_enabled=trace_enabled,
+	)
+	return orchestrator.run(request)
+
+
+def _module_id_index(module_id: str) -> int:
+	if not isinstance(module_id, str):
+		return -1
+	text = module_id.strip().upper()
+	if not text.startswith("M"):
+		return -1
+	try:
+		return int(text[1:])
+	except ValueError:
+		return -1
+
+
+def _v2_module_outputs(result: Dict[str, object]) -> Dict[str, Dict[str, Any]]:
+	module_outputs = result.get("module_outputs")
+	if not isinstance(module_outputs, dict):
+		return {}
+	selected: Dict[str, Dict[str, Any]] = {}
+	for module_id, payload in module_outputs.items():
+		if not isinstance(module_id, str):
+			continue
+		index = _module_id_index(module_id)
+		if index < 10 or index > 23:
+			continue
+		if isinstance(payload, dict):
+			selected[module_id] = payload
+	return selected
+
+
+def _build_v2_payload(
+	*,
+	result: Dict[str, object],
+	trace: List[dict],
+	session_id: str | None,
+	trace_enabled: bool,
+) -> Dict[str, Any]:
+	mode = str(result.get("mode") or "plan_execute").strip().lower()
+	if mode not in {"clarify", "plan_execute"}:
+		mode = "plan_execute"
+	final_message = str(result.get("final_message") or result.get("candidate_response") or "").strip()
+	decision_graph = result.get("decision_graph")
+	if not isinstance(decision_graph, list):
+		decision_graph = []
+	quality = result.get("quality")
+	if not isinstance(quality, dict):
+		quality = {}
+	safety = result.get("safety")
+	if not isinstance(safety, dict):
+		safety = {}
+	fallback = result.get("fallback")
+	if not isinstance(fallback, dict):
+		fallback = {}
+	payload: Dict[str, Any] = {
+		"aca_version": "4.1",
+		"session_id": session_id or "",
+		"mode": mode,
+		"final_message": final_message,
+		"decision_graph": decision_graph,
+		"module_outputs": _v2_module_outputs(result),
+		"quality": quality,
+		"safety": safety,
+		"fallback": fallback,
+	}
+	if trace_enabled:
+		payload["trace"] = trace
+	return payload
+
+
+def respond_with_trace(
+	*,
+	user_input: str,
+	context: str | None = None,
+	risk_tolerance: RiskTolerance = "medium",
+	max_questions: int = 2,
+	model: str | None = None,
+	session_id: str | None = None,
+	trace_enabled: bool = False,
+) -> Tuple[Dict[str, object], List[dict]]:
+	cleaned = " ".join(user_input.split())
+	if not cleaned:
+		raise ValueError("user_input must not be empty.")
+
+	mode = _provider_mode()
+	effective_mode = _resolved_provider_mode(mode)
+	resolved_model = _resolve_model(model)
+	session_context = _session_context_text(session_id, chat_session_service.default_context_turns())
+	combined_context = _merge_context(context, session_context)
+
+	if _aca_enabled():
+		result, trace = _run_aca_pipeline(
+			user_input=cleaned,
+			context=combined_context,
+			risk_tolerance=risk_tolerance,
+			max_questions=max_questions,
+			mode=effective_mode,
+			model=resolved_model,
+			session_id=session_id,
+			trace_enabled=trace_enabled,
+		)
+	else:
+		result = _build_result(
+			user_input=cleaned,
+			context=combined_context,
+			risk_tolerance=risk_tolerance,
+			max_questions=max_questions,
+			mode=effective_mode,
+			model=resolved_model,
+		)
+		trace = []
+
+	_append_session_turns(session_id, cleaned, result)
+	return result, trace
+
+
 def respond(
 	*,
 	user_input: str,
@@ -862,23 +1019,15 @@ def respond(
 	model: str | None = None,
 	session_id: str | None = None,
 ) -> Dict[str, object]:
-	cleaned = " ".join(user_input.split())
-	if not cleaned:
-		raise ValueError("user_input must not be empty.")
-
-	mode = _provider_mode()
-	resolved_model = _resolve_model(model)
-	session_context = _session_context_text(session_id, chat_session_service.default_context_turns())
-	combined_context = _merge_context(context, session_context)
-	result = _build_result(
-		user_input=cleaned,
-		context=combined_context,
+	result, _trace = respond_with_trace(
+		user_input=user_input,
+		context=context,
 		risk_tolerance=risk_tolerance,
 		max_questions=max_questions,
-		mode=mode,
-		model=resolved_model,
+		model=model,
+		session_id=session_id,
+		trace_enabled=False,
 	)
-	_append_session_turns(session_id, cleaned, result)
 	return result
 
 
@@ -890,12 +1039,14 @@ def stream_respond(
 	max_questions: int = 2,
 	model: str | None = None,
 	session_id: str | None = None,
+	trace_enabled: bool = False,
 ) -> Iterator[Dict[str, Any]]:
 	cleaned = " ".join(user_input.split())
 	if not cleaned:
 		raise ValueError("user_input must not be empty.")
 
 	mode = _provider_mode()
+	effective_mode = _resolved_provider_mode(mode)
 	resolved_model = _resolve_model(model)
 	session_context = _session_context_text(session_id, chat_session_service.default_context_turns())
 	combined_context = _merge_context(context, session_context)
@@ -903,41 +1054,180 @@ def stream_respond(
 	yield {
 		"event": "meta",
 		"data": {
-			"provider_mode": mode,
+			"provider_mode": effective_mode,
+			"configured_provider_mode": mode,
 			"model": resolved_model,
 			"session_id": session_id,
+			"aca_enabled": _aca_enabled(),
+			"trace_enabled": trace_enabled,
 		},
 	}
 
-	if mode == "local":
-		result = _respond_local(
+	trace_events: List[dict] = []
+	if _aca_enabled():
+		result, trace_events = _run_aca_pipeline(
 			user_input=cleaned,
 			context=combined_context,
 			risk_tolerance=risk_tolerance,
 			max_questions=max_questions,
+			mode=effective_mode,
+			model=resolved_model,
+			session_id=session_id,
+			trace_enabled=trace_enabled,
 		)
 		deltas = _chunk_text(str(result.get("candidate_response", "")))
+		if trace_enabled:
+			for event in trace_events:
+				yield {"event": "trace", "data": event}
 	else:
-		result, deltas = _openai_stream_response(
-			user_input=cleaned,
-			context=combined_context,
-			risk_tolerance=risk_tolerance,
-			max_questions=max_questions,
-			mode=mode,
-			model=resolved_model,
-		)
+		if effective_mode == "local":
+			result = _respond_local(
+				user_input=cleaned,
+				context=combined_context,
+				risk_tolerance=risk_tolerance,
+				max_questions=max_questions,
+			)
+			deltas = _chunk_text(str(result.get("candidate_response", "")))
+		else:
+			result, deltas = _openai_stream_response(
+				user_input=cleaned,
+				context=combined_context,
+				risk_tolerance=risk_tolerance,
+				max_questions=max_questions,
+				mode=effective_mode,
+				model=resolved_model,
+			)
 
 	for delta in deltas:
 		yield {"event": "delta", "data": {"text": delta}}
 
 	result["model"] = resolved_model
-	result["provider_mode"] = mode
+	result["provider_mode"] = effective_mode
 	_append_session_turns(session_id, cleaned, result)
+	done_data: Dict[str, Any] = {
+		"assistant": result,
+		"session_id": session_id,
+		"model": resolved_model,
+	}
+	if trace_enabled:
+		done_data["aca_trace"] = trace_events
 	yield {
 		"event": "done",
+		"data": done_data,
+	}
+
+
+def respond_v2_with_trace(
+	*,
+	user_input: str,
+	context: str | None = None,
+	risk_tolerance: RiskTolerance = "medium",
+	max_questions: int = 2,
+	model: str | None = None,
+	session_id: str | None = None,
+	trace_enabled: bool = False,
+) -> Tuple[Dict[str, Any], List[dict]]:
+	cleaned = " ".join(user_input.split())
+	if not cleaned:
+		raise ValueError("user_input must not be empty.")
+
+	mode = _provider_mode()
+	effective_mode = _resolved_provider_mode(mode)
+	resolved_model = _resolve_model(model)
+	session_context = _session_context_text(session_id, chat_session_service.default_context_turns())
+	combined_context = _merge_context(context, session_context)
+
+	result, trace = _run_aca_pipeline(
+		user_input=cleaned,
+		context=combined_context,
+		risk_tolerance=risk_tolerance,
+		max_questions=max_questions,
+		mode=effective_mode,
+		model=resolved_model,
+		session_id=session_id,
+		trace_enabled=trace_enabled,
+	)
+	result["model"] = resolved_model
+	result["provider_mode"] = effective_mode
+	v2 = _build_v2_payload(
+		result=result,
+		trace=trace,
+		session_id=session_id,
+		trace_enabled=trace_enabled,
+	)
+	_append_session_turns(session_id, cleaned, {"final_message": v2.get("final_message", "")})
+	return v2, trace
+
+
+def stream_v2(
+	*,
+	user_input: str,
+	context: str | None = None,
+	risk_tolerance: RiskTolerance = "medium",
+	max_questions: int = 2,
+	model: str | None = None,
+	session_id: str | None = None,
+	trace_enabled: bool = False,
+) -> Iterator[Dict[str, Any]]:
+	cleaned = " ".join(user_input.split())
+	if not cleaned:
+		raise ValueError("user_input must not be empty.")
+
+	mode = _provider_mode()
+	effective_mode = _resolved_provider_mode(mode)
+	resolved_model = _resolve_model(model)
+	session_context = _session_context_text(session_id, chat_session_service.default_context_turns())
+	combined_context = _merge_context(context, session_context)
+
+	yield {
+		"event": "meta",
 		"data": {
-			"assistant": result,
-			"session_id": session_id,
+			"api_version": "v2",
+			"aca_version": "4.1",
+			"provider_mode": effective_mode,
+			"configured_provider_mode": mode,
 			"model": resolved_model,
+			"session_id": session_id,
+			"trace_enabled": trace_enabled,
 		},
 	}
+
+	result, trace = _run_aca_pipeline(
+		user_input=cleaned,
+		context=combined_context,
+		risk_tolerance=risk_tolerance,
+		max_questions=max_questions,
+		mode=effective_mode,
+		model=resolved_model,
+		session_id=session_id,
+		trace_enabled=trace_enabled,
+	)
+	result["model"] = resolved_model
+	result["provider_mode"] = effective_mode
+
+	for event in trace:
+		yield {
+			"event": "checkpoint",
+			"data": {
+				"module_id": event.get("module_id"),
+				"module_name": event.get("module_name"),
+				"status": event.get("status"),
+				"tier": event.get("tier"),
+				"detail": event.get("detail"),
+			},
+		}
+		if trace_enabled:
+			yield {"event": "trace", "data": event}
+
+	message = str(result.get("final_message") or result.get("candidate_response") or "")
+	for delta in _chunk_text(message):
+		yield {"event": "delta", "data": {"text": delta}}
+
+	v2 = _build_v2_payload(
+		result=result,
+		trace=trace,
+		session_id=session_id,
+		trace_enabled=trace_enabled,
+	)
+	_append_session_turns(session_id, cleaned, {"final_message": v2.get("final_message", "")})
+	yield {"event": "done", "data": v2}

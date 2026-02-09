@@ -20,8 +20,11 @@ const state = {
     messages: [],
     pending: "",
     risk_tolerance: "medium",
+    api_version: "v1",
     model: "",
-    models: []
+    models: [],
+    aca_trace_enabled: false,
+    last_trace: []
   },
   help: {
     checklist_progress: {},
@@ -41,6 +44,17 @@ function setStatus(text) {
   const node = document.getElementById("assistantStatusText");
   if (node) {
     node.textContent = text;
+  }
+}
+
+function renderApiVersionUi() {
+  const badge = document.getElementById("assistantApiBadge");
+  if (badge) {
+    badge.textContent = `API ${state.chat.api_version.toUpperCase()}`;
+  }
+  const select = document.getElementById("chatApiVersion");
+  if (select) {
+    select.value = state.chat.api_version;
   }
 }
 
@@ -96,7 +110,12 @@ function loadState() {
       state.chat.risk_tolerance = ["low", "medium", "high"].includes(parsed.chat.risk_tolerance)
         ? parsed.chat.risk_tolerance
         : "medium";
+      state.chat.api_version = ["v1", "v2"].includes(parsed.chat.api_version)
+        ? parsed.chat.api_version
+        : "v1";
       state.chat.model = typeof parsed.chat.model === "string" ? parsed.chat.model : "";
+      state.chat.aca_trace_enabled = Boolean(parsed.chat.aca_trace_enabled);
+      state.chat.last_trace = Array.isArray(parsed.chat.last_trace) ? parsed.chat.last_trace : [];
     }
     if (parsed.help && typeof parsed.help === "object") {
       state.help.checklist_progress = typeof parsed.help.checklist_progress === "object" && parsed.help.checklist_progress
@@ -111,7 +130,10 @@ function loadState() {
   } catch (_error) {
     state.chat.messages = [];
     state.chat.risk_tolerance = "medium";
+    state.chat.api_version = "v1";
     state.chat.model = "";
+    state.chat.aca_trace_enabled = false;
+    state.chat.last_trace = [];
     state.help = {
       checklist_progress: {},
       last_opened_section: "quick-start",
@@ -126,7 +148,10 @@ function persistState() {
     chat: {
       messages: state.chat.messages,
       risk_tolerance: state.chat.risk_tolerance,
-      model: state.chat.model
+      api_version: state.chat.api_version,
+      model: state.chat.model,
+      aca_trace_enabled: state.chat.aca_trace_enabled,
+      last_trace: state.chat.last_trace
     },
     help: state.help,
     welcomeSeen: state.welcomeSeen
@@ -209,6 +234,48 @@ function renderChat() {
   if (risk) {
     risk.value = state.chat.risk_tolerance;
   }
+  const traceToggle = document.getElementById("chatTraceToggle");
+  if (traceToggle) {
+    traceToggle.checked = Boolean(state.chat.aca_trace_enabled);
+  }
+  renderApiVersionUi();
+}
+
+function renderTrace() {
+  const panel = document.getElementById("acaTracePanel");
+  const list = document.getElementById("acaTraceList");
+  if (!panel || !list) {
+    return;
+  }
+  const enabled = Boolean(state.chat.aca_trace_enabled);
+  panel.hidden = !enabled;
+  if (!enabled) {
+    list.innerHTML = "";
+    return;
+  }
+  const trace = Array.isArray(state.chat.last_trace) ? state.chat.last_trace : [];
+  if (!trace.length) {
+    list.innerHTML = `<li class="trace-item">No trace yet. Ask assistant with ACA Trace enabled.</li>`;
+    return;
+  }
+  list.innerHTML = trace.map(item => {
+    const moduleId = escapeHtml(item?.module_id || "?");
+    const moduleName = escapeHtml(item?.module_name || "unknown");
+    const status = escapeHtml(item?.status || "pass");
+    const tier = escapeHtml(item?.tier || "tier3_operational");
+    const detail = escapeHtml(item?.detail || "");
+    return `
+      <li class="trace-item">
+        <div class="trace-meta">
+          <span>${moduleId}</span>
+          <span>${moduleName}</span>
+          <span>${status}</span>
+          <span>${tier}</span>
+        </div>
+        <div>${detail}</div>
+      </li>
+    `;
+  }).join("");
 }
 
 function pushMessage(role, text) {
@@ -243,6 +310,26 @@ function recentContextText(limit = 12) {
   return turns.map(turn => `${turn.role}: ${turn.text}`).join("\n");
 }
 
+function isV2AssistantPayload(payload) {
+  return Boolean(payload && typeof payload === "object" && payload.aca_version === "4.1");
+}
+
+function normalizeAssistantPayload(payload) {
+  if (isV2AssistantPayload(payload)) {
+    return {
+      mode: payload.mode === "clarify" ? "clarify" : "plan_execute",
+      recommended_questions: Array.isArray(payload.recommended_questions) ? payload.recommended_questions : [],
+      candidate_response: String(payload.final_message || ""),
+      decision_graph: Array.isArray(payload.decision_graph) ? payload.decision_graph : [],
+      module_outputs: payload.module_outputs && typeof payload.module_outputs === "object" ? payload.module_outputs : {},
+      fallback: payload.fallback && typeof payload.fallback === "object" ? payload.fallback : {},
+      safety: payload.safety && typeof payload.safety === "object" ? payload.safety : {},
+      quality: payload.quality && typeof payload.quality === "object" ? payload.quality : {}
+    };
+  }
+  return payload;
+}
+
 function formatAssistantMessage(assistant) {
   if (!assistant || typeof assistant !== "object") {
     return "No assistant output was returned.";
@@ -268,6 +355,7 @@ async function apiJSON(method, path, body, extraHeaders = {}) {
   const headers = {
     "Content-Type": "application/json",
     "X-Session-ID": state.chat.session_id,
+    ...(state.chat.aca_trace_enabled ? { "X-ACA-Trace": "1" } : {}),
     ...extraHeaders
   };
   const options = { method, headers };
@@ -315,13 +403,17 @@ async function loadModels() {
 
 function buildRequestPayload(prompt) {
   const context = recentContextText();
-  return {
+  const payload = {
     user_input: prompt,
     context,
     risk_tolerance: state.chat.risk_tolerance,
     max_questions: 2,
     model: state.chat.model || undefined
   };
+  if (state.chat.api_version === "v2") {
+    payload.trace = Boolean(state.chat.aca_trace_enabled);
+  }
+  return payload;
 }
 
 function parseSseFrame(rawFrame) {
@@ -354,20 +446,45 @@ function parseSseFrame(rawFrame) {
 }
 
 async function runFallbackRespond(payload) {
-  const response = await apiJSON("POST", "/api/assistant/respond", payload);
-  const sessionId = response?.data?.session_id;
+  const useV2 = state.chat.api_version === "v2";
+  const endpoint = useV2 ? "/api/assistant/respond-v2" : "/api/assistant/respond";
+  const response = await apiJSON("POST", endpoint, payload);
+  const data = response?.data || {};
+
+  if (useV2) {
+    const sessionId = data?.session_id;
+    if (typeof sessionId === "string" && sessionId.trim()) {
+      updateSessionId(sessionId);
+    }
+    if (state.chat.aca_trace_enabled && Array.isArray(data?.trace)) {
+      state.chat.last_trace = data.trace;
+      persistState();
+      renderTrace();
+    }
+    return normalizeAssistantPayload(data);
+  }
+
+  const sessionId = data?.session_id;
   if (typeof sessionId === "string" && sessionId.trim()) {
     updateSessionId(sessionId);
   }
-  return response?.data?.assistant || null;
+  if (state.chat.aca_trace_enabled && Array.isArray(data?.aca_trace)) {
+    state.chat.last_trace = data.aca_trace;
+    persistState();
+    renderTrace();
+  }
+  return normalizeAssistantPayload(data?.assistant || null);
 }
 
 async function runStream(payload) {
-  const response = await fetch("/api/assistant/stream", {
+  const useV2 = state.chat.api_version === "v2";
+  const endpoint = useV2 ? "/api/assistant/stream-v2" : "/api/assistant/stream";
+  const response = await fetch(endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "X-Session-ID": state.chat.session_id
+      "X-Session-ID": state.chat.session_id,
+      ...(state.chat.aca_trace_enabled ? { "X-ACA-Trace": "1" } : {})
     },
     body: JSON.stringify(payload)
   });
@@ -380,6 +497,7 @@ async function runStream(payload) {
   const decoder = new TextDecoder();
   let buffer = "";
   let donePayload = null;
+  let tracePayload = [];
 
   while (true) {
     const { done, value } = await reader.read();
@@ -415,6 +533,31 @@ async function runStream(payload) {
       }
       if (event === "done") {
         donePayload = data;
+        if (!useV2 && state.chat.aca_trace_enabled && Array.isArray(data?.aca_trace)) {
+          tracePayload = data.aca_trace;
+        }
+        if (useV2 && state.chat.aca_trace_enabled && Array.isArray(data?.trace)) {
+          tracePayload = data.trace;
+        }
+        continue;
+      }
+      if (event === "trace") {
+        if (state.chat.aca_trace_enabled && data && typeof data === "object") {
+          tracePayload.push(data);
+        }
+        continue;
+      }
+      if (event === "checkpoint") {
+        if (state.chat.aca_trace_enabled && data && typeof data === "object") {
+          tracePayload.push({
+            module_id: data.module_id || "?",
+            module_name: data.module_name || "checkpoint",
+            status: data.status || "pass",
+            tier: data.tier || "tier3_operational",
+            detail: data.detail || "checkpoint",
+            timestamp: new Date().toISOString()
+          });
+        }
         continue;
       }
       if (event === "error") {
@@ -427,11 +570,19 @@ async function runStream(payload) {
     throw new Error("Assistant stream ended without done event.");
   }
 
-  const sessionId = donePayload?.session_id;
+  const sessionId = useV2 ? donePayload?.session_id : donePayload?.session_id;
   if (typeof sessionId === "string" && sessionId.trim()) {
     updateSessionId(sessionId);
   }
-  return donePayload?.assistant || null;
+  if (state.chat.aca_trace_enabled) {
+    state.chat.last_trace = tracePayload;
+    persistState();
+    renderTrace();
+  }
+  if (useV2) {
+    return normalizeAssistantPayload(donePayload);
+  }
+  return normalizeAssistantPayload(donePayload?.assistant || null);
 }
 
 async function askAssistant() {
@@ -448,6 +599,10 @@ async function askAssistant() {
   input.value = "";
   markChecklist("chat_define_goal", true);
   markChecklist("chat_ask", true);
+  if (state.chat.aca_trace_enabled) {
+    state.chat.last_trace = [];
+    renderTrace();
+  }
   persistState();
 
   const payload = buildRequestPayload(prompt);
@@ -613,6 +768,7 @@ function handleError(error) {
   state.chat.pending = "";
   renderChat();
   pushMessage("assistant", `I hit an error: ${message}`);
+  renderTrace();
 }
 
 function onGlobalKeydown(event) {
@@ -726,6 +882,27 @@ function wire() {
     });
   }
 
+  const apiVersion = document.getElementById("chatApiVersion");
+  if (apiVersion) {
+    apiVersion.addEventListener("change", () => {
+      state.chat.api_version = apiVersion.value === "v2" ? "v2" : "v1";
+      persistState();
+      renderApiVersionUi();
+    });
+  }
+
+  const traceToggle = document.getElementById("chatTraceToggle");
+  if (traceToggle) {
+    traceToggle.addEventListener("change", () => {
+      state.chat.aca_trace_enabled = traceToggle.checked;
+      if (!state.chat.aca_trace_enabled) {
+        state.chat.last_trace = [];
+      }
+      persistState();
+      renderTrace();
+    });
+  }
+
   const closeWelcome = document.getElementById("closeWelcome");
   const startWelcome = document.getElementById("startWelcome");
   const dismissWelcome = () => {
@@ -758,6 +935,7 @@ async function init() {
   wire();
   syncBusyUi();
   renderChat();
+  renderTrace();
   applyHelpVisibility();
   updateHelpChecklistUi();
   if (!state.welcomeSeen) {

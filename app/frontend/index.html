@@ -237,7 +237,7 @@
 
     .compose-row {
       display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr)) auto;
+      grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
       gap: 8px;
       align-items: end;
     }
@@ -264,6 +264,58 @@
       padding: 5px 10px;
       font-size: 0.75rem;
       font-weight: 700;
+    }
+
+    .trace-panel {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fbfcff;
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+    }
+
+    .trace-panel[hidden] {
+      display: none;
+    }
+
+    .trace-title {
+      margin: 0;
+      font-size: 0.82rem;
+      color: var(--ink-soft);
+      font-weight: 800;
+      letter-spacing: 0.03em;
+      text-transform: uppercase;
+    }
+
+    .trace-list {
+      margin: 0;
+      padding: 0;
+      list-style: none;
+      display: grid;
+      gap: 6px;
+      max-height: 170px;
+      overflow: auto;
+    }
+
+    .trace-item {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 6px 8px;
+      display: grid;
+      gap: 2px;
+      font-size: 0.76rem;
+      color: var(--ink-soft);
+      font-family: "IBM Plex Mono", "Cascadia Code", monospace;
+    }
+
+    .trace-meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      font-weight: 700;
+      color: var(--ink);
     }
 
     .overlay[hidden] { display: none; }
@@ -397,6 +449,11 @@
           <p class="subtitle">Assistant-first workspace with streaming responses, practical planning, and memory across refreshes.</p>
         </div>
         <div class="toolbar">
+          <span id="assistantApiBadge" class="chip">API V1</span>
+          <label class="chip" title="Show ACA module trace">
+            <input id="chatTraceToggle" type="checkbox" />
+            ACA Trace
+          </label>
           <button id="assistantOpenHelp" data-allow-busy="true">Help</button>
         </div>
       </div>
@@ -423,6 +480,13 @@
             Model
             <select id="chatModel"></select>
           </label>
+          <label for="chatApiVersion">
+            API Version
+            <select id="chatApiVersion">
+              <option value="v1">v1</option>
+              <option value="v2">v2</option>
+            </select>
+          </label>
           <div class="toolbar">
             <button id="chatSend" class="primary" type="submit">Ask</button>
             <button id="chatClear" type="button">Clear</button>
@@ -435,6 +499,10 @@
           <button type="button" class="chip" data-role="chat-prompt" data-prompt="Create an implementation brief with scope, milestones, risks, and tests.">Implementation brief</button>
         </div>
       </form>
+      <section id="acaTracePanel" class="trace-panel" hidden>
+        <p class="trace-title">ACA Module Timeline</p>
+        <ul id="acaTraceList" class="trace-list"></ul>
+      </section>
     </section>
   </main>
 

@@ -6,6 +6,8 @@ from datetime import datetime, timedelta, timezone
 from threading import Lock
 from typing import Dict, List
 
+from app.backend.aca import policies
+
 
 _DEFAULT_TTL_SECONDS = 6 * 60 * 60
 _DEFAULT_MAX_TURNS = 80
@@ -91,6 +93,11 @@ def append_turn(session_id: str, role: str, text: str) -> ChatSession:
 	cleaned = " ".join(text.split()).strip()
 	if not cleaned:
 		return ensure_session(session_id)
+	cleaned = policies.sanitize_memory_text(cleaned)
+	if not cleaned:
+		return ensure_session(session_id)
+	if not policies.memory_write_allowed(cleaned):
+		cleaned = "[redacted_internal]"
 	role_clean = "assistant" if role == "assistant" else "user"
 	with _LOCK:
 		_evict_expired_locked()
