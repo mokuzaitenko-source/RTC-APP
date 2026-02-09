@@ -125,6 +125,23 @@ class AssistantStreamTests(TestCase):
 		self.assertIn("aca_trace", done_data)
 		self.assertIsInstance(done_data["aca_trace"], list)
 
+	def test_stream_conversation_small_talk_returns_direct_reply(self) -> None:
+		os.environ["ASSISTANT_PROVIDER_MODE"] = "local"
+		os.environ["ASSISTANT_OPENAI_MODELS"] = "gpt-4.1-mini"
+		with self.client.stream(
+			"POST",
+			"/api/assistant/stream",
+			json={"user_input": "hi", "model": "gpt-4.1-mini"},
+		) as response:
+			self.assertEqual(response.status_code, 200)
+			raw = "".join(response.iter_text())
+		events = _parse_sse_events(raw)
+		done_data = next(data for name, data in events if name == "done")
+		assistant = done_data.get("assistant", {})
+		self.assertEqual(assistant.get("mode"), "plan_execute")
+		self.assertEqual(assistant.get("interaction_mode"), "conversation")
+		self.assertEqual(assistant.get("recommended_questions"), [])
+
 	def test_stream_blocks_untrusted_tool_instruction(self) -> None:
 		os.environ["ASSISTANT_PROVIDER_MODE"] = "local"
 		os.environ["ASSISTANT_OPENAI_MODELS"] = "gpt-4.1-mini"

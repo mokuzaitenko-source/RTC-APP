@@ -73,6 +73,29 @@ class AssistantProviderTests(TestCase):
 		self.assertEqual(ctx.exception.status_code, 400)
 		self.assertEqual(ctx.exception.code, "assistant_invalid_model")
 
+	def test_conversation_intent_returns_direct_response(self) -> None:
+		with patch.dict(
+			os.environ,
+			{"ASSISTANT_PROVIDER_MODE": "local", "ASSISTANT_OPENAI_MODELS": "gpt-4.1-mini"},
+			clear=False,
+		):
+			result = assistant_service.respond(user_input="hi")
+		self.assertEqual(result.get("mode"), "plan_execute")
+		self.assertEqual(result.get("interaction_mode"), "conversation")
+		self.assertEqual(result.get("recommended_questions"), [])
+		self.assertTrue(str(result.get("candidate_response", "")).strip())
+
+	def test_conversation_question_returns_conversation_mode(self) -> None:
+		with patch.dict(
+			os.environ,
+			{"ASSISTANT_PROVIDER_MODE": "local", "ASSISTANT_OPENAI_MODELS": "gpt-4.1-mini"},
+			clear=False,
+		):
+			result = assistant_service.respond(user_input="can we chat?")
+		self.assertEqual(result.get("mode"), "plan_execute")
+		self.assertEqual(result.get("interaction_mode"), "conversation")
+		self.assertEqual(result.get("recommended_questions"), [])
+
 	def test_model_catalog_returns_allowlist(self) -> None:
 		with patch.dict(
 			os.environ,

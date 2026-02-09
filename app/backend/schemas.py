@@ -40,7 +40,7 @@ class AssistantRespondRequest(BaseModel):
 	user_input: str = Field(..., min_length=1, description="Primary user request.")
 	context: Optional[str] = Field(default=None, description="Optional supporting context.")
 	risk_tolerance: Literal["low", "medium", "high"] = Field(default="medium")
-	max_questions: int = Field(default=2, ge=0, le=2)
+	max_questions: int = Field(default=1, ge=0, le=2)
 	model: Optional[str] = Field(default=None, description="Optional model override from allowlist.")
 
 
@@ -50,7 +50,7 @@ class AssistantStreamRequest(BaseModel):
 	user_input: str = Field(..., min_length=1, description="Primary user request.")
 	context: Optional[str] = Field(default=None, description="Optional supporting context.")
 	risk_tolerance: Literal["low", "medium", "high"] = Field(default="medium")
-	max_questions: int = Field(default=2, ge=0, le=2)
+	max_questions: int = Field(default=1, ge=0, le=2)
 	model: Optional[str] = Field(default=None, description="Optional model override from allowlist.")
 
 
@@ -60,7 +60,7 @@ class AssistantRespondV2Request(BaseModel):
 	user_input: str = Field(..., min_length=1, description="Primary user request.")
 	context: Optional[str] = Field(default=None, description="Optional supporting context.")
 	risk_tolerance: Literal["low", "medium", "high"] = Field(default="medium")
-	max_questions: int = Field(default=2, ge=0, le=2)
+	max_questions: int = Field(default=1, ge=0, le=2)
 	model: Optional[str] = Field(default=None, description="Optional model override from allowlist.")
 	trace: bool = Field(default=False, description="Include ACA trace in response payload.")
 
@@ -71,7 +71,7 @@ class AssistantStreamV2Request(BaseModel):
 	user_input: str = Field(..., min_length=1, description="Primary user request.")
 	context: Optional[str] = Field(default=None, description="Optional supporting context.")
 	risk_tolerance: Literal["low", "medium", "high"] = Field(default="medium")
-	max_questions: int = Field(default=2, ge=0, le=2)
+	max_questions: int = Field(default=1, ge=0, le=2)
 	model: Optional[str] = Field(default=None, description="Optional model override from allowlist.")
 	trace: bool = Field(default=False, description="Emit trace/checkpoint SSE events.")
 
@@ -111,6 +111,7 @@ class AssistantV2ResponseData(BaseModel):
 	safety: Dict[str, Any] = Field(default_factory=dict)
 	fallback: Dict[str, Any] = Field(default_factory=dict)
 	lane_used: Literal["quick", "governed"] = "governed"
+	interaction_mode: Literal["conversation", "task"] = "task"
 	complexity_reasons: List[str] = Field(default_factory=list)
 	pqs_overall: float = 0.0
 	fallback_level: int = 0

@@ -471,7 +471,7 @@ function buildRequestPayload(prompt) {
     user_input: userInput,
     context,
     risk_tolerance: state.chat.risk_tolerance,
-    max_questions: 2,
+    max_questions: 1,
     model: state.chat.model || undefined
   };
   if (state.chat.api_version === "v2") {

@@ -50,6 +50,7 @@ class AssistantV2ContractTests(TestCase):
 		self.assertIsInstance(data.get("safety"), dict)
 		self.assertIsInstance(data.get("fallback"), dict)
 		self.assertIn(data.get("lane_used"), {"quick", "governed"})
+		self.assertIn(data.get("interaction_mode"), {"conversation", "task"})
 		self.assertIsInstance(data.get("complexity_reasons"), list)
 		self.assertIsInstance(data.get("pqs_overall"), (int, float))
 		self.assertIsInstance(data.get("fallback_level"), int)

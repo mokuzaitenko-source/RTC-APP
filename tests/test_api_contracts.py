@@ -44,7 +44,7 @@ class ApiContractsTests(TestCase):
 		self.assertEqual(assistant["lane_used"], "governed")
 		self.assertIn("ambiguity_over_threshold", assistant["complexity_reasons"])
 		self.assertGreaterEqual(len(assistant["recommended_questions"]), 1)
-		self.assertLessEqual(len(assistant["recommended_questions"]), 2)
+		self.assertLessEqual(len(assistant["recommended_questions"]), 1)
 		self.assertGreaterEqual(assistant["ambiguity_score"], 0.55)
 
 	def test_assistant_respond_returns_plan_execute_for_specific_prompt(self) -> None:

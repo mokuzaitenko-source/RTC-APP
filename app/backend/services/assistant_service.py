@@ -49,11 +49,41 @@ _OBJECTIVE_VERBS = {
 	"implement",
 	"deploy",
 	"ship",
+	"plan",
 	"write",
 	"fix",
 	"refactor",
 	"test",
 	"document",
+}
+
+_CONVERSATION_TOKENS = {
+	"hi",
+	"hello",
+	"hey",
+	"yo",
+	"sup",
+	"thanks",
+	"thank",
+	"morning",
+	"evening",
+}
+
+_CONVERSATION_PHRASES = {
+	"what's up",
+	"how are you",
+	"can we chat",
+	"let's chat",
+	"just chatting",
+	"how's it going",
+}
+
+_TASK_MARKERS = _OBJECTIVE_VERBS | {
+	"deadline",
+	"constraints",
+	"acceptance",
+	"milestone",
+	"roadmap",
 }
 
 _RISK_TOKENS = {"auth", "payment", "security", "privacy", "legal", "medical", "finance", "production"}
@@ -233,6 +263,22 @@ def _tokenize(text: str) -> List[str]:
 	return re.findall(r"[a-zA-Z0-9']+", text.lower())
 
 
+def _has_task_markers(tokens: List[str]) -> bool:
+	return bool(set(tokens) & _TASK_MARKERS)
+
+
+def _detect_interaction_mode(user_input: str, context: str | None) -> str:
+	combined = _combined_text(user_input, context).lower()
+	tokens = _tokenize(combined)
+	if _has_task_markers(tokens):
+		return "task"
+	if set(tokens) & _CONVERSATION_TOKENS:
+		return "conversation"
+	if any(phrase in combined for phrase in _CONVERSATION_PHRASES):
+		return "conversation"
+	return "task"
+
+
 def _ambiguity_score(user_input: str, context: str | None) -> Tuple[float, List[str]]:
 	tokens = _tokenize(user_input)
 	score = 0.0
@@ -263,6 +309,59 @@ def _combined_text(user_input: str, context: str | None) -> str:
 	if isinstance(context, str) and context.strip():
 		parts.append(context.strip())
 	return "\n".join(part for part in parts if part)
+
+
+def _detect_interaction_mode(user_input: str, context: str | None) -> Literal["conversation", "task"]:
+	combined = _combined_text(user_input, context).lower().strip()
+	tokens = set(_tokenize(user_input))
+	has_task_markers = bool(tokens & _TASK_MARKER_TOKENS) or any(
+		phrase in combined
+		for phrase in [
+			"acceptance criteria",
+			"success criteria",
+			"implementation brief",
+			"roadmap",
+			"mvp",
+			"api",
+			"feature",
+			"bug",
+		]
+	)
+	has_conversation_markers = bool(tokens & _CONVERSATION_TOKENS) or any(
+		phrase in combined for phrase in _CONVERSATION_PHRASES
+	)
+	if has_conversation_markers and not has_task_markers:
+		return "conversation"
+	if len(tokens) <= 4 and not has_task_markers and not any(ch.isdigit() for ch in combined):
+		return "conversation"
+	return "task"
+
+
+def _has_task_markers(user_input: str, context: str | None) -> bool:
+	combined = _combined_text(user_input, context).lower().strip()
+	tokens = set(_tokenize(user_input))
+	return bool(tokens & _TASK_MARKER_TOKENS) or any(
+		phrase in combined
+		for phrase in [
+			"acceptance criteria",
+			"success criteria",
+			"implementation brief",
+			"roadmap",
+			"mvp",
+			"api",
+			"feature",
+			"bug",
+		]
+	)
+
+
+def _conversation_response(user_input: str) -> str:
+	text = user_input.lower()
+	if any(phrase in text for phrase in ["how are you", "what's up", "whats up"]):
+		return "I’m here and ready. Tell me what you want to build, fix, or plan, and I’ll help step by step."
+	if "thanks" in text or "thank" in text:
+		return "Anytime. If you want, give me your goal and constraints and I’ll turn it into a practical plan."
+	return "Yeah, we can chat. Tell me your goal in plain language, and I’ll help you shape it into actionable next steps."
 
 
 def _extract_prefixed_value(text: str, label: str) -> str:
@@ -425,6 +524,15 @@ def _quick_contract_response(
 	)
 
 
+def _conversation_response(user_input: str) -> str:
+	text = " ".join(user_input.split()).strip()
+	if not text:
+		return "Hey. I'm here. What do you want to work on?"
+	if any(token in _tokenize(text) for token in {"thanks", "thank"}):
+		return "You're welcome. Want to keep going or switch tasks?"
+	return "Hey. I'm here. Tell me what you want to build, fix, or decide."
+
+
 def _governed_clarify_response(questions: List[str]) -> str:
 	lines = [
 		"Governed lane is active. I need clarification before execution:",
@@ -538,6 +646,10 @@ def _apply_adaptive_protocol(
 			risk_tolerance=risk_tolerance,
 		)
 		local_ambiguity, ambiguity_notes = _ambiguity_score(user_input, context)
+		interaction_mode = _detect_interaction_mode(user_input, context)
+		combined_tokens = _tokenize(_combined_text(user_input, context))
+		is_task_request = _has_task_markers(combined_tokens)
+		ambiguous_terms_present = any(note.startswith("ambiguous_terms") for note in ambiguity_notes)
 		forced_lane = _forced_lane_override(user_input, context)
 		complexity_reasons = _complexity_reasons(
 			user_input=user_input,
@@ -546,6 +658,9 @@ def _apply_adaptive_protocol(
 			ambiguity_threshold=state.ambiguity_threshold,
 		)
 		lane_used = "governed" if complexity_reasons else "quick"
+		if interaction_mode == "conversation":
+			lane_used = "quick"
+			complexity_reasons = ["conversation_intent"]
 		if forced_lane == "governed":
 			lane_used = "governed"
 			complexity_reasons = ["forced_full_governed", *complexity_reasons]
@@ -566,8 +681,23 @@ def _apply_adaptive_protocol(
 		if not isinstance(assumptions, list):
 			assumptions = []
 		confidence = _estimate_confidence(result)
-		if lane_used == "governed":
-			if local_ambiguity > state.ambiguity_threshold and max_questions > 0:
+		if interaction_mode == "conversation":
+			result["mode"] = "plan_execute"
+			result["recommended_questions"] = []
+			result["plan"] = []
+			result["candidate_response"] = _conversation_response(user_input)
+			result["assumptions"] = []
+			if not isinstance(result.get("quality"), dict):
+				result["quality"] = _score_quality(
+					candidate_response=str(result["candidate_response"]),
+					plan=[],
+					user_input=user_input,
+					recommended_questions=[],
+				)
+		elif lane_used == "governed":
+			if local_ambiguity > state.ambiguity_threshold and max_questions > 0 and (
+				not is_task_request or ambiguous_terms_present
+			):
 				questions = _clarifying_questions(user_input, max_questions)
 				result["mode"] = "clarify"
 				result["recommended_questions"] = questions[:max_questions]
@@ -650,6 +780,7 @@ def _apply_adaptive_protocol(
 			result["candidate_response"] = candidate
 
 		result["lane_used"] = lane_used
+		result["interaction_mode"] = interaction_mode
 		result["complexity_reasons"] = complexity_reasons
 		result["intake_frame"] = intake_frame
 		result["pqs_overall"] = round(pqs_overall, 2)
@@ -1546,6 +1677,7 @@ def _build_v2_payload(
 		"safety": safety,
 		"fallback": fallback,
 		"lane_used": lane_used,
+		"interaction_mode": str(result.get("interaction_mode") or "task"),
 		"complexity_reasons": complexity_reasons,
 		"pqs_overall": pqs_overall,
 		"fallback_level": fallback_level,
@@ -1576,7 +1708,7 @@ def respond_with_trace(
 	user_input: str,
 	context: str | None = None,
 	risk_tolerance: RiskTolerance = "medium",
-	max_questions: int = 2,
+	max_questions: int = 1,
 	model: str | None = None,
 	session_id: str | None = None,
 	trace_enabled: bool = False,
@@ -1632,7 +1764,7 @@ def respond(
 	user_input: str,
 	context: str | None = None,
 	risk_tolerance: RiskTolerance = "medium",
-	max_questions: int = 2,
+	max_questions: int = 1,
 	model: str | None = None,
 	session_id: str | None = None,
 ) -> Dict[str, object]:
@@ -1653,7 +1785,7 @@ def stream_respond(
 	user_input: str,
 	context: str | None = None,
 	risk_tolerance: RiskTolerance = "medium",
-	max_questions: int = 2,
+	max_questions: int = 1,
 	model: str | None = None,
 	session_id: str | None = None,
 	trace_enabled: bool = False,
@@ -1748,7 +1880,7 @@ def respond_v2_with_trace(
 	user_input: str,
 	context: str | None = None,
 	risk_tolerance: RiskTolerance = "medium",
-	max_questions: int = 2,
+	max_questions: int = 1,
 	model: str | None = None,
 	session_id: str | None = None,
 	trace_enabled: bool = False,
@@ -1800,7 +1932,7 @@ def stream_v2(
 	user_input: str,
 	context: str | None = None,
 	risk_tolerance: RiskTolerance = "medium",
-	max_questions: int = 2,
+	max_questions: int = 1,
 	model: str | None = None,
 	session_id: str | None = None,
 	trace_enabled: bool = False,
