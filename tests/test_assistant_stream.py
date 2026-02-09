@@ -125,7 +125,7 @@ class AssistantStreamTests(TestCase):
 		self.assertIn("aca_trace", done_data)
 		self.assertIsInstance(done_data["aca_trace"], list)
 
-	def test_stream_conversation_small_talk_returns_direct_reply(self) -> None:
+	def test_stream_conversation_small_talk_returns_single_clarify(self) -> None:
 		os.environ["ASSISTANT_PROVIDER_MODE"] = "local"
 		os.environ["ASSISTANT_OPENAI_MODELS"] = "gpt-4.1-mini"
 		with self.client.stream(
@@ -138,9 +138,9 @@ class AssistantStreamTests(TestCase):
 		events = _parse_sse_events(raw)
 		done_data = next(data for name, data in events if name == "done")
 		assistant = done_data.get("assistant", {})
-		self.assertEqual(assistant.get("mode"), "plan_execute")
+		self.assertEqual(assistant.get("mode"), "clarify")
 		self.assertEqual(assistant.get("interaction_mode"), "conversation")
-		self.assertEqual(assistant.get("recommended_questions"), [])
+		self.assertLessEqual(len(assistant.get("recommended_questions", [])), 1)
 
 	def test_stream_enforces_requested_five_step_plan(self) -> None:
 		os.environ["ASSISTANT_PROVIDER_MODE"] = "local"
@@ -161,9 +161,14 @@ class AssistantStreamTests(TestCase):
 		plan = assistant.get("plan")
 		self.assertIsInstance(plan, list)
 		self.assertEqual(len(plan), 5)
+		self.assertFalse(any("verify" in str(step).lower() or "fallback" in str(step).lower() for step in plan[:3]))
+		self.assertTrue("verify" in str(plan[3]).lower() or "gate" in str(plan[3]).lower())
+		self.assertIn("fallback", str(plan[4]).lower())
 		candidate = str(assistant.get("candidate_response", ""))
 		self.assertIn("5.", candidate)
 		self.assertNotIn("6.", candidate)
+		self.assertNotIn("Workflow directive:", candidate)
+		self.assertNotIn("Output format requirement:", candidate)
 
 	def test_stream_blocks_untrusted_tool_instruction(self) -> None:
 		os.environ["ASSISTANT_PROVIDER_MODE"] = "local"

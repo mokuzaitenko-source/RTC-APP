@@ -40,8 +40,11 @@ class AssistantV2ContractTests(TestCase):
 		data = payload["data"]
 		self.assertEqual(data["aca_version"], "4.1")
 		self.assertEqual(data["session_id"], "v2-contract-session")
-		self.assertIn(data["mode"], {"clarify", "plan_execute"})
+		self.assertEqual(data["mode"], "plan_execute")
 		self.assertIn("final_message", data)
+		self.assertIn("1.", data["final_message"])
+		self.assertIn("5.", data["final_message"])
+		self.assertIn("fallback", data["final_message"].lower())
 		self.assertIsInstance(data.get("decision_graph"), list)
 		self.assertIsInstance(data.get("module_outputs"), dict)
 		self.assertIn("M10", data["module_outputs"])

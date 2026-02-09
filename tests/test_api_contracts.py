@@ -21,10 +21,10 @@ class ApiContractsTests(TestCase):
 		else:
 			os.environ["ASSISTANT_PROVIDER_MODE"] = self._prev_provider_mode
 
-	def test_unknown_finding_state_patch_returns_404(self) -> None:
+	def test_unknown_route_returns_404_envelope(self) -> None:
 		response = self.client.patch(
-			"/api/findings/F-999/state",
-			json={"status": "in_progress"},
+			"/api/unknown-route",
+			json={"foo": "bar"},
 		)
 		self.assertEqual(response.status_code, 404)
 		payload = response.json()
@@ -62,11 +62,28 @@ class ApiContractsTests(TestCase):
 		assistant = payload["data"]["assistant"]
 		self.assertEqual(assistant["mode"], "plan_execute")
 		self.assertEqual(assistant["lane_used"], "quick")
-		self.assertGreaterEqual(len(assistant["plan"]), 4)
-		self.assertTrue(any("gate" in step.lower() for step in assistant["plan"]))
-		self.assertTrue(any("fallback" in step.lower() for step in assistant["plan"]))
+		self.assertEqual(len(assistant["plan"]), 5)
+		self.assertFalse(any("verify" in step.lower() or "fallback" in step.lower() for step in assistant["plan"][:3]))
+		self.assertTrue("verify" in assistant["plan"][3].lower() or "gate" in assistant["plan"][3].lower())
+		self.assertIn("fallback", assistant["plan"][4].lower())
 		self.assertEqual(assistant["quality"]["revision_required"], False)
 		self.assertTrue(str(assistant["candidate_response"]).startswith("Decision:"))
+		self.assertNotIn("Workflow directive:", str(assistant["candidate_response"]))
+		self.assertNotIn("Output format requirement:", str(assistant["candidate_response"]))
+
+	def test_assistant_respond_returns_debug_oriented_plan_for_debug_prompt(self) -> None:
+		response = self.client.post(
+			"/api/assistant/respond",
+			json={"user_input": "Debug a flaky failing test and isolate the regression root cause."},
+		)
+		self.assertEqual(response.status_code, 200)
+		payload = response.json()
+		self.assertTrue(payload["ok"])
+		assistant = payload["data"]["assistant"]
+		self.assertEqual(assistant["mode"], "plan_execute")
+		self.assertEqual(len(assistant["plan"]), 5)
+		joined = " ".join(str(step).lower() for step in assistant["plan"][:3])
+		self.assertTrue(any(token in joined for token in ["reproduce", "root cause", "isolate", "patch", "regression"]))
 
 	def test_assistant_models_endpoint_returns_catalog(self) -> None:
 		response = self.client.get("/api/assistant/models")
@@ -125,8 +142,11 @@ class ApiContractsTests(TestCase):
 		self.assertIn('id="chatForm"', body)
 		self.assertIn('id="chatInput"', body)
 		self.assertIn('id="chatModel"', body)
+		self.assertIn('id="chatWorkflow"', body)
 		self.assertIn('id="helpOverlay"', body)
 		self.assertIn('src="/app/app.js"', body)
+		self.assertIn('id="assistantAdvancedDrawer" class="advanced-drawer" hidden', body)
+		self.assertNotIn('id="welcomeOverlay"', body)
 		self.assertNotIn("Start Session", body)
 		self.assertNotIn("Run Sync", body)
 		self.assertNotIn("Run Validate", body)
@@ -134,23 +154,15 @@ class ApiContractsTests(TestCase):
 		self.assertNotIn("Top Actions", body)
 		self.assertNotIn('id="opsShell"', body)
 
-	def test_root_route_serves_landing_with_app_cta(self) -> None:
-		response = self.client.get("/")
-		self.assertEqual(response.status_code, 200)
-		body = response.text
-		self.assertIn("RTC Assistant Hub", body)
-		self.assertIn("Open Assistant", body)
-		self.assertIn('href="/app"', body)
-		self.assertIn('href="/learn"', body)
+	def test_root_route_redirects_to_app(self) -> None:
+		response = self.client.get("/", follow_redirects=False)
+		self.assertEqual(response.status_code, 307)
+		self.assertEqual(response.headers.get("location"), "/app")
 
-	def test_learn_route_serves_career_coach_page(self) -> None:
-		response = self.client.get("/learn")
-		self.assertEqual(response.status_code, 200)
-		body = response.text
-		self.assertIn("RTC Coach", body)
-		self.assertIn('id="coachForm"', body)
-		self.assertIn('id="coachInput"', body)
-		self.assertIn('src="/app/learn.js"', body)
+	def test_learn_route_redirects_to_app(self) -> None:
+		response = self.client.get("/learn", follow_redirects=False)
+		self.assertEqual(response.status_code, 307)
+		self.assertEqual(response.headers.get("location"), "/app")
 
 	def test_assistant_respond_auto_mode_without_openai_key_falls_back_to_local(self) -> None:
 		previous_mode = os.environ.get("ASSISTANT_PROVIDER_MODE")

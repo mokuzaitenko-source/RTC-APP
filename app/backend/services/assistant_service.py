@@ -52,6 +52,9 @@ _OBJECTIVE_VERBS = {
 	"plan",
 	"write",
 	"fix",
+	"debug",
+	"troubleshoot",
+	"investigate",
 	"refactor",
 	"test",
 	"document",
@@ -285,6 +288,37 @@ def _has_task_phrases(text: str) -> bool:
 	return False
 
 
+def _is_debug_request(user_input: str, context: str | None) -> bool:
+	combined = _combined_text(user_input, context).lower()
+	debug_phrases = (
+		"failing test",
+		"tests failing",
+		"test failure",
+		"assertion error",
+		"stack trace",
+		"traceback",
+		"regression bug",
+	)
+	for phrase in debug_phrases:
+		if phrase in combined:
+			return True
+	debug_markers = {
+		"debug",
+		"bug",
+		"failing",
+		"failure",
+		"traceback",
+		"exception",
+		"flaky",
+		"crash",
+		"regression",
+		"broken",
+		"fix",
+	}
+	tokens = set(_tokenize(combined))
+	return bool(tokens & debug_markers)
+
+
 def _detect_interaction_mode(user_input: str, context: str | None) -> Literal["conversation", "task"]:
 	user_text = " ".join(user_input.split()).strip().lower()
 	user_tokens = _tokenize(user_text)
@@ -417,9 +451,21 @@ def _extract_intake_frame(
 	risk_tolerance: RiskTolerance,
 ) -> Dict[str, Any]:
 	combined = _combined_text(user_input, context)
+	def _strip_control_hints(text: str) -> str:
+		lines = []
+		for raw in text.splitlines():
+			line = raw.strip()
+			if not line:
+				continue
+			lower = line.lower()
+			if lower.startswith("workflow directive:") or lower.startswith("output format requirement:"):
+				continue
+			lines.append(line)
+		return " ".join(lines).strip()
+
 	goal = _extract_prefixed_value(combined, "goal")
 	if not goal:
-		goal = " ".join(user_input.split()).strip()
+		goal = _strip_control_hints(user_input) or " ".join(user_input.split()).strip()
 	constraints = _extract_constraints(combined)
 	done_when = _extract_done_when(combined, goal)
 	risk = _extract_prefixed_value(combined, "risk").lower() or str(risk_tolerance)
@@ -503,16 +549,29 @@ def _quick_contract_response(
 	intake_frame: Dict[str, Any],
 ) -> str:
 	goal = str(intake_frame.get("goal") or "the requested outcome")
-	decision = f"Proceed with a focused implementation for: {goal}"
-	why = "Request is clear and low-risk, so quick lane is selected for fast progress."
-	checks = "Validate objective alignment and run one acceptance check before handoff."
-	next_step = "Execute the first smallest verifiable step and report outcome."
+	plan_raw = result.get("plan")
+	plan = _string_list(plan_raw, limit=16) if isinstance(plan_raw, list) else []
+	actions = [step for step in plan if "verify" not in step.lower() and "fallback" not in step.lower()]
+	verify = next((step for step in plan if "verify" in step.lower() or "gate" in step.lower()), "")
+	fallback = next((step for step in plan if "fallback" in step.lower()), "")
+	if not actions:
+		actions = [
+			f"Action 1: define the smallest executable slice for: {goal}.",
+			"Action 2: implement the slice end-to-end without adding extra scope.",
+			"Action 3: add deterministic tests for success and failure paths.",
+		]
+	if not verify:
+		verify = "Verification gate: run checks and confirm acceptance criteria."
+	if not fallback:
+		fallback = "Fallback: narrow scope, ask one clarification, and continue with the safest useful step."
+	decision = f"Proceed with focused execution for: {goal}"
 	return (
 		f"Decision: {decision}\n"
-		f"Why: {why}\n"
-		"Checks:\n"
-		f"- {checks}\n"
-		f"Next step: {next_step}"
+		f"1. {actions[0]}\n"
+		f"2. {actions[1] if len(actions) > 1 else actions[0]}\n"
+		f"3. {actions[2] if len(actions) > 2 else actions[-1]}\n"
+		f"4. {verify}\n"
+		f"5. {fallback}"
 	)
 
 
@@ -630,7 +689,6 @@ def _apply_adaptive_protocol(
 		)
 		local_ambiguity, ambiguity_notes = _ambiguity_score(user_input, context)
 		interaction_mode = _detect_interaction_mode(user_input, context)
-		requested_step_count = _requested_step_count(user_input)
 		user_tokens = _tokenize(user_input)
 		is_task_request = _has_task_markers(user_tokens) or _has_task_phrases(user_input)
 		ambiguous_terms_present = any(note.startswith("ambiguous_terms") for note in ambiguity_notes)
@@ -658,26 +716,28 @@ def _apply_adaptive_protocol(
 		if not isinstance(quality, dict):
 			quality = {}
 			result["quality"] = quality
-		pqs_overall_raw = quality.get("overall", 8.0)
-		pqs_overall = float(pqs_overall_raw) if isinstance(pqs_overall_raw, (int, float)) else 8.0
 
 		assumptions = result.get("assumptions")
 		if not isinstance(assumptions, list):
 			assumptions = []
 		confidence = _estimate_confidence(result)
+
 		if interaction_mode == "conversation":
-			result["mode"] = "plan_execute"
-			result["recommended_questions"] = []
+			limit = max(1, min(max_questions, 1))
+			questions = _clarifying_questions(user_input, limit)[:limit]
+			result["mode"] = "clarify"
+			result["recommended_questions"] = questions
 			result["plan"] = []
-			result["candidate_response"] = _conversation_response(user_input)
+			result["candidate_response"] = (
+				"Tell me one concrete thing you want to build or debug, and I will return a strict 3+1+1 execution plan."
+			)
 			result["assumptions"] = []
-			if not isinstance(result.get("quality"), dict):
-				result["quality"] = _score_quality(
-					candidate_response=str(result["candidate_response"]),
-					plan=[],
-					user_input=user_input,
-					recommended_questions=[],
-				)
+			result["quality"] = _score_quality(
+				candidate_response=str(result["candidate_response"]),
+				plan=[],
+				user_input=user_input,
+				recommended_questions=questions,
+			)
 		elif lane_used == "governed":
 			if local_ambiguity > state.ambiguity_threshold and max_questions > 0 and (
 				not is_task_request or ambiguous_terms_present
@@ -687,6 +747,21 @@ def _apply_adaptive_protocol(
 				result["recommended_questions"] = questions[:max_questions]
 				result["plan"] = []
 				result["candidate_response"] = _governed_clarify_response(questions[:max_questions])
+			else:
+				plan_items = _strict_execution_plan(
+					user_input=user_input,
+					context=context,
+					risk_tolerance=risk_tolerance,
+					candidate_plan=result.get("plan") if isinstance(result.get("plan"), list) else None,
+				)
+				result["mode"] = "plan_execute"
+				result["recommended_questions"] = []
+				result["plan"] = plan_items
+				result["candidate_response"] = _compose_candidate_response(
+					plan_items,
+					user_input,
+					risk_tolerance,
+				)
 			if confidence < _LOW_CONFIDENCE_THRESHOLD:
 				assumptions.append("Assumed constraints and environment remain valid until explicitly corrected.")
 			if "risk_domain_signal" in complexity_reasons:
@@ -694,15 +769,18 @@ def _apply_adaptive_protocol(
 			assumptions = list(dict.fromkeys(str(item).strip() for item in assumptions if str(item).strip()))
 			if assumptions:
 				result["assumptions"] = assumptions
-			if pqs_overall < 8.0:
-				current_iterations = result.get("iteration_count")
-				iterations = int(current_iterations) if isinstance(current_iterations, int) else 1
-				result["iteration_count"] = min(3, max(iterations, 2))
 		else:
 			result["mode"] = "plan_execute"
 			result["recommended_questions"] = []
+			plan_items = _strict_execution_plan(
+				user_input=user_input,
+				context=context,
+				risk_tolerance=risk_tolerance,
+				candidate_plan=result.get("plan") if isinstance(result.get("plan"), list) else None,
+			)
+			result["plan"] = plan_items
 			result["candidate_response"] = _quick_contract_response(
-				result=result,
+				result={**result, "plan": plan_items},
 				intake_frame=intake_frame,
 			)
 			result["checks"] = [
@@ -715,28 +793,33 @@ def _apply_adaptive_protocol(
 			]
 			result["assumptions"] = []
 
-		if (
-			requested_step_count is not None
-			and interaction_mode != "conversation"
-			and result.get("mode") == "plan_execute"
-		):
-			plan = result.get("plan")
-			plan_items = _string_list(plan, limit=16) if isinstance(plan, list) else []
-			if not plan_items:
-				plan_items = _make_plan(user_input, context, risk_tolerance)
-			plan_items = _enforce_step_count(plan_items, requested_step_count)
-			result["plan"] = plan_items
-			result["candidate_response"] = _compose_candidate_response(
-				plan_items,
-				user_input,
-				risk_tolerance,
+		if result.get("mode") == "plan_execute":
+			plan_items = _strict_execution_plan(
+				user_input=user_input,
+				context=context,
+				risk_tolerance=risk_tolerance,
+				candidate_plan=result.get("plan") if isinstance(result.get("plan"), list) else None,
 			)
+			result["plan"] = plan_items
+			if lane_used == "governed" or not str(result.get("candidate_response", "")).strip():
+				result["candidate_response"] = _compose_candidate_response(
+					plan_items,
+					user_input,
+					risk_tolerance,
+				)
 			result["quality"] = _score_quality(
-				candidate_response=str(result["candidate_response"]),
+				candidate_response=str(result.get("candidate_response", "")),
 				plan=plan_items,
 				user_input=user_input,
 				recommended_questions=[],
 			)
+
+		pqs_overall_raw = result.get("quality", {}).get("overall") if isinstance(result.get("quality"), dict) else 8.0
+		pqs_overall = float(pqs_overall_raw) if isinstance(pqs_overall_raw, (int, float)) else 8.0
+		if lane_used == "governed" and result.get("mode") == "plan_execute" and pqs_overall < 8.0:
+			current_iterations = result.get("iteration_count")
+			iterations = int(current_iterations) if isinstance(current_iterations, int) else 1
+			result["iteration_count"] = min(3, max(iterations, 2))
 
 		missing_decision_keys: List[str] = []
 		if "No explicit constraints provided" in " ".join(intake_frame.get("constraints", [])):
@@ -775,7 +858,7 @@ def _apply_adaptive_protocol(
 			result["fallback"] = fallback
 		fallback["level"] = fallback_level
 
-		if lane_used == "governed" and fallback_level >= 2:
+		if lane_used == "governed" and fallback_level >= 2 and result.get("mode") == "plan_execute":
 			candidate = str(result.get("candidate_response") or "").strip()
 			candidate = (
 				f"{candidate}\n\n"
@@ -874,6 +957,64 @@ def _enforce_step_count(plan: List[str], target_count: int) -> List[str]:
 	return _dedupe_steps(normalized)
 
 
+def _is_verification_step(step: str) -> bool:
+	lowered = step.lower()
+	return "verification" in lowered or "verify" in lowered or "gate" in lowered
+
+
+def _is_fallback_step(step: str) -> bool:
+	return "fallback" in step.lower()
+
+
+def _is_strict_execution_plan(plan: List[str]) -> bool:
+	if len(plan) != 5:
+		return False
+	if any(_is_verification_step(step) or _is_fallback_step(step) for step in plan[:3]):
+		return False
+	return _is_verification_step(plan[3]) and _is_fallback_step(plan[4])
+
+
+def _strict_execution_plan(
+	*,
+	user_input: str,
+	context: str | None,
+	risk_tolerance: RiskTolerance,
+	candidate_plan: List[str] | None = None,
+) -> List[str]:
+	if isinstance(candidate_plan, list):
+		cleaned_candidate = _dedupe_steps(candidate_plan)
+		if _is_strict_execution_plan(cleaned_candidate):
+			return cleaned_candidate
+
+	base = _make_plan(user_input, context, risk_tolerance)
+	cleaned = _dedupe_steps(base)
+	if _is_strict_execution_plan(cleaned):
+		return cleaned
+
+	actions = [step for step in cleaned if not _is_verification_step(step) and not _is_fallback_step(step)]
+	if len(actions) < 3:
+		goal = _extract_prefixed_value(_combined_text(user_input, context), "goal") or "the requested outcome"
+		if _is_debug_request(user_input, context):
+			actions = [
+				f"Action 1: reproduce the issue for '{goal}' with one deterministic failing case.",
+				"Action 2: isolate likely root cause by checking logs, failing path, and recent changes.",
+				"Action 3: apply the smallest safe patch and keep scope limited to the failing behavior.",
+			]
+		else:
+			actions = [
+				f"Action 1: define the smallest shippable slice for '{goal}' and confirm constraints.",
+				"Action 2: implement that slice end-to-end with minimal scope and explicit boundaries.",
+				"Action 3: add deterministic tests for one success path and one failure path.",
+			]
+	verify = next((step for step in cleaned if _is_verification_step(step)), "")
+	if not verify:
+		verify = "Verification gate: run checks and confirm acceptance criteria are met before handoff."
+	fallback = next((step for step in cleaned if _is_fallback_step(step)), "")
+	if not fallback:
+		fallback = f"Fallback: {_fallback_policy_text(risk_tolerance)}"
+	return [actions[0], actions[1], actions[2], verify, fallback]
+
+
 def _default_prompt_book_steps(context: str | None, risk_tolerance: RiskTolerance) -> List[str]:
 	steps = [
 		"Input gate: restate objective, assumptions, constraints, and success criteria before execution.",
@@ -934,27 +1075,41 @@ def _align_plan_to_prompt_book(
 
 
 def _make_plan(user_input: str, context: str | None, risk_tolerance: RiskTolerance) -> List[str]:
-	_ = user_input
-	steps = _default_prompt_book_steps(context, risk_tolerance)
-	return _align_plan_to_prompt_book(
-		plan=steps,
+	intake = _extract_intake_frame(
+		user_input=user_input,
 		context=context,
 		risk_tolerance=risk_tolerance,
 	)
+	goal = str(intake.get("goal") or "the requested outcome")
+	if _is_debug_request(user_input, context):
+		return [
+			f"Action 1: reproduce the issue for '{goal}' with one deterministic failing case.",
+			"Action 2: isolate likely root cause by checking logs, failing path, and recent changes.",
+			"Action 3: apply the smallest safe patch and keep scope limited to the failing behavior.",
+			"Verification gate: run targeted tests plus one regression check to confirm the failure is resolved.",
+			f"Fallback: {_fallback_policy_text(risk_tolerance)}",
+		]
+	return [
+		f"Action 1: define the smallest shippable slice for '{goal}' and confirm constraints.",
+		"Action 2: implement that slice end-to-end with minimal scope and explicit boundaries.",
+		"Action 3: add deterministic tests for one success path and one failure path.",
+		"Verification gate: run checks and confirm acceptance criteria are met before handoff.",
+		f"Fallback: {_fallback_policy_text(risk_tolerance)}",
+	]
 
 
 def _compose_candidate_response(plan: List[str], user_input: str, risk_tolerance: RiskTolerance) -> str:
-	lines = [
-		"Oversight-guided execution path:",
-	]
-	for idx, step in enumerate(plan, start=1):
+	normalized = _strict_execution_plan(
+		user_input=user_input,
+		context=None,
+		risk_tolerance=risk_tolerance,
+		candidate_plan=plan,
+	)
+	intake = _extract_intake_frame(user_input=user_input, context=None, risk_tolerance=risk_tolerance)
+	goal = str(intake.get("goal") or "the requested outcome")
+	lines = [f"Decision: execute focused steps for {goal}."]
+	for idx, step in enumerate(normalized, start=1):
 		lines.append(f"{idx}. {step}")
-	lines.append("")
-	lines.append("Gate checks: objective clarity, scope fit, policy compliance, and output quality.")
-	lines.append(f"Fallback behavior: {_fallback_policy_text(risk_tolerance)}")
-	lines.append("")
-	lines.append(f"Risk tolerance applied: {risk_tolerance}.")
-	lines.append(f"Original request focus: {user_input}")
 	return "\n".join(lines)
 
 
@@ -1265,22 +1420,13 @@ def _normalize_openai_payload(
 		}
 		return _validate_normalized_payload(normalized)
 
-	if not plan:
-		plan = _make_plan(user_input, context, risk_tolerance)
-	else:
-		plan = _align_plan_to_prompt_book(
-			plan=plan,
-			context=context,
-			risk_tolerance=risk_tolerance,
-		)
-	candidate = str(payload.get("candidate_response", "")).strip()
-	if not candidate:
-		candidate = _compose_candidate_response(plan, user_input, risk_tolerance)
-	else:
-		if "gate" not in candidate.lower():
-			candidate = f"{candidate}\n\nGate checks: objective clarity, policy compliance, and output format."
-		if "fallback" not in candidate.lower():
-			candidate = f"{candidate}\nFallback policy: {_fallback_policy_text(risk_tolerance)}"
+	plan = _strict_execution_plan(
+		user_input=user_input,
+		context=context,
+		risk_tolerance=risk_tolerance,
+		candidate_plan=plan if plan else None,
+	)
+	candidate = _compose_candidate_response(plan, user_input, risk_tolerance)
 	quality = _score_quality(
 		candidate_response=candidate,
 		plan=plan,
@@ -1706,12 +1852,27 @@ def _build_v2_payload(
 	lane_used = str(result.get("lane_used") or "governed")
 	if lane_used not in {"quick", "governed"}:
 		lane_used = "governed"
+	interaction_mode = str(result.get("interaction_mode") or "task")
+	if interaction_mode not in {"conversation", "task"}:
+		interaction_mode = "task"
 	complexity_reasons = result.get("complexity_reasons")
 	if not isinstance(complexity_reasons, list):
 		complexity_reasons = []
 	assumptions = result.get("assumptions")
 	if not isinstance(assumptions, list):
 		assumptions = []
+	intake_frame = result.get("intake_frame")
+	if not isinstance(intake_frame, dict):
+		intake_frame = {}
+	adaptive_defaults = result.get("adaptive_defaults")
+	if not isinstance(adaptive_defaults, dict):
+		adaptive_defaults = {}
+	adaptive_evolution = result.get("adaptive_evolution")
+	if not isinstance(adaptive_evolution, list):
+		adaptive_evolution = []
+	runtime_metrics = result.get("runtime_metrics")
+	if not isinstance(runtime_metrics, dict):
+		runtime_metrics = {}
 	pqs_overall_raw = result.get("pqs_overall")
 	if isinstance(pqs_overall_raw, (int, float)):
 		pqs_overall = round(float(pqs_overall_raw), 2)
@@ -1733,15 +1894,15 @@ def _build_v2_payload(
 		"safety": safety,
 		"fallback": fallback,
 		"lane_used": lane_used,
-		"interaction_mode": str(result.get("interaction_mode") or "task"),
+		"interaction_mode": interaction_mode,
 		"complexity_reasons": complexity_reasons,
 		"pqs_overall": pqs_overall,
 		"fallback_level": fallback_level,
 		"assumptions": assumptions,
-		"intake_frame": result.get("intake_frame", {}),
-		"adaptive_defaults": result.get("adaptive_defaults", {}),
-		"adaptive_evolution": result.get("adaptive_evolution", []),
-		"runtime_metrics": result.get("runtime_metrics", {}),
+		"intake_frame": intake_frame,
+		"adaptive_defaults": adaptive_defaults,
+		"adaptive_evolution": adaptive_evolution,
+		"runtime_metrics": runtime_metrics,
 	}
 	if trace_enabled:
 		payload["trace"] = trace

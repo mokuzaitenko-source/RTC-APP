@@ -73,28 +73,30 @@ class AssistantProviderTests(TestCase):
 		self.assertEqual(ctx.exception.status_code, 400)
 		self.assertEqual(ctx.exception.code, "assistant_invalid_model")
 
-	def test_conversation_intent_returns_direct_response(self) -> None:
+	def test_conversation_intent_routes_to_single_clarify(self) -> None:
 		with patch.dict(
 			os.environ,
 			{"ASSISTANT_PROVIDER_MODE": "local", "ASSISTANT_OPENAI_MODELS": "gpt-4.1-mini"},
 			clear=False,
 		):
 			result = assistant_service.respond(user_input="hi")
-		self.assertEqual(result.get("mode"), "plan_execute")
+		self.assertEqual(result.get("mode"), "clarify")
 		self.assertEqual(result.get("interaction_mode"), "conversation")
-		self.assertEqual(result.get("recommended_questions"), [])
-		self.assertTrue(str(result.get("candidate_response", "")).strip())
+		questions = result.get("recommended_questions")
+		self.assertIsInstance(questions, list)
+		self.assertLessEqual(len(questions), 1)
+		self.assertTrue(str(result.get("candidate_response", "")).strip().startswith("Tell me one concrete thing"))
 
-	def test_conversation_question_returns_conversation_mode(self) -> None:
+	def test_conversation_question_returns_conversation_clarify(self) -> None:
 		with patch.dict(
 			os.environ,
 			{"ASSISTANT_PROVIDER_MODE": "local", "ASSISTANT_OPENAI_MODELS": "gpt-4.1-mini"},
 			clear=False,
 		):
 			result = assistant_service.respond(user_input="can we chat?")
-		self.assertEqual(result.get("mode"), "plan_execute")
+		self.assertEqual(result.get("mode"), "clarify")
 		self.assertEqual(result.get("interaction_mode"), "conversation")
-		self.assertEqual(result.get("recommended_questions"), [])
+		self.assertLessEqual(len(result.get("recommended_questions", [])), 1)
 
 	def test_requested_five_step_plan_is_enforced(self) -> None:
 		with patch.dict(
@@ -110,6 +112,9 @@ class AssistantProviderTests(TestCase):
 		plan = result.get("plan")
 		self.assertIsInstance(plan, list)
 		self.assertEqual(len(plan), 5)
+		self.assertFalse(any("verify" in str(step).lower() or "fallback" in str(step).lower() for step in plan[:3]))
+		self.assertTrue("verify" in str(plan[3]).lower() or "gate" in str(plan[3]).lower())
+		self.assertIn("fallback", str(plan[4]).lower())
 		candidate = str(result.get("candidate_response", ""))
 		self.assertIn("1.", candidate)
 		self.assertIn("5.", candidate)

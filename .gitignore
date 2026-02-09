@@ -25,3 +25,6 @@ tmp_*.txt
 .playwright-cli/
 all caht.txt
 propmting book.txt
+
+# Generated automation artifacts
+output/

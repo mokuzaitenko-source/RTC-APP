@@ -5,20 +5,19 @@ from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from app.backend import constants
 from app.backend.middleware import RequestContextMiddleware
 from app.backend.response import error_response
-from app.backend.routers import actions, assistant, export, findings, health, ops, requirements, session
+from app.backend.routers import assistant
 
 _FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend"
-_LANDING_PATH = _FRONTEND_DIR / "landing.html"
-_LEARN_PATH = _FRONTEND_DIR / "learn.html"
 
 
 def create_app() -> FastAPI:
@@ -54,24 +53,13 @@ def _register_routers(app: FastAPI) -> None:
 
 		@app.get("/", include_in_schema=False)
 		def serve_root():
-			if _LANDING_PATH.exists():
-				return FileResponse(str(_LANDING_PATH))
 			return RedirectResponse(url="/app")
 
 		@app.get("/learn", include_in_schema=False)
 		def serve_learn():
-			if _LEARN_PATH.exists():
-				return FileResponse(str(_LEARN_PATH))
 			return RedirectResponse(url="/app")
 
-	app.include_router(ops.router)
-	app.include_router(session.router)
 	app.include_router(assistant.router)
-	app.include_router(actions.router)
-	app.include_router(findings.router)
-	app.include_router(requirements.router)
-	app.include_router(health.router)
-	app.include_router(export.router)
 
 
 def _register_handlers(app: FastAPI) -> None:
@@ -95,6 +83,15 @@ def _register_handlers(app: FastAPI) -> None:
 			message=message,
 			request=request,
 			evidence=evidence,
+		)
+		return JSONResponse(status_code=exc.status_code, content=payload)
+
+	@app.exception_handler(StarletteHTTPException)
+	async def handle_starlette_http_exception(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+		payload = error_response(
+			code=f"http_{exc.status_code}",
+			message=_exc_message(exc.detail),
+			request=request,
 		)
 		return JSONResponse(status_code=exc.status_code, content=payload)
 
