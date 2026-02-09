@@ -264,6 +264,57 @@ def _tokenize(text: str) -> List[str]:
 
 
 def _has_task_markers(tokens: List[str]) -> bool:
+	return bool(set(tokens) & _TASK_MARKERS) or any(
+		phrase in " ".join(tokens)
+		for phrase in [
+			"acceptance criteria",
+			"success criteria",
+			"implementation brief",
+			"roadmap",
+			"mvp",
+			"api",
+			"feature",
+			"bug",
+		]
+	)
+
+
+def _detect_interaction_mode(user_input: str, context: str | None) -> Literal["conversation", "task"]:
+	combined = _combined_text(user_input, context).lower().strip()
+	tokens = set(_tokenize(combined))
+	has_task_markers = bool(tokens & _TASK_MARKERS) or any(
+		phrase in combined
+		for phrase in [
+			"acceptance criteria",
+			"success criteria",
+			"implementation brief",
+			"roadmap",
+			"mvp",
+			"api",
+			"feature",
+			"bug",
+		]
+	)
+	has_conversation_markers = bool(tokens & _CONVERSATION_TOKENS) or any(
+		phrase in combined for phrase in _CONVERSATION_PHRASES
+	)
+	if has_conversation_markers and not has_task_markers:
+		return "conversation"
+	if len(tokens) <= 4 and not has_task_markers and not any(ch.isdigit() for ch in combined):
+		return "conversation"
+	return "task"
+
+
+def _conversation_response(user_input: str) -> str:
+	text = user_input.lower()
+	if any(phrase in text for phrase in ["how are you", "what's up", "whats up"]):
+		return "I'm here and ready. Tell me what you want to build, fix, or plan, and I'll help step by step."
+	if "thanks" in text or "thank" in text:
+		return "Anytime. If you want, give me your goal and constraints and I'll turn it into a practical plan."
+	return "Yeah, we can chat. Tell me your goal in plain language, and I'll help you shape it into actionable next steps."
+
+
+def _has_task_markers(tokens: List[str]) -> bool:
 	return bool(set(tokens) & _TASK_MARKERS)
 
 
@@ -309,59 +360,6 @@ def _combined_text(user_input: str, context: str | None) -> str:
 	if isinstance(context, str) and context.strip():
 		parts.append(context.strip())
 	return "\n".join(part for part in parts if part)
-
-
-def _detect_interaction_mode(user_input: str, context: str | None) -> Literal["conversation", "task"]:
-	combined = _combined_text(user_input, context).lower().strip()
-	tokens = set(_tokenize(user_input))
-	has_task_markers = bool(tokens & _TASK_MARKER_TOKENS) or any(
-		phrase in combined
-		for phrase in [
-			"acceptance criteria",
-			"success criteria",
-			"implementation brief",
-			"roadmap",
-			"mvp",
-			"api",
-			"feature",
-			"bug",
-		]
-	)
-	has_conversation_markers = bool(tokens & _CONVERSATION_TOKENS) or any(
-		phrase in combined for phrase in _CONVERSATION_PHRASES
-	)
-	if has_conversation_markers and not has_task_markers:
-		return "conversation"
-	if len(tokens) <= 4 and not has_task_markers and not any(ch.isdigit() for ch in combined):
-		return "conversation"
-	return "task"
-
-
-def _has_task_markers(user_input: str, context: str | None) -> bool:
-	combined = _combined_text(user_input, context).lower().strip()
-	tokens = set(_tokenize(user_input))
-	return bool(tokens & _TASK_MARKER_TOKENS) or any(
-		phrase in combined
-		for phrase in [
-			"acceptance criteria",
-			"success criteria",
-			"implementation brief",
-			"roadmap",
-			"mvp",
-			"api",
-			"feature",
-			"bug",
-		]
-	)
-
-
-def _conversation_response(user_input: str) -> str:
-	text = user_input.lower()
-	if any(phrase in text for phrase in ["how are you", "what's up", "whats up"]):
-		return "I’m here and ready. Tell me what you want to build, fix, or plan, and I’ll help step by step."
-	if "thanks" in text or "thank" in text:
-		return "Anytime. If you want, give me your goal and constraints and I’ll turn it into a practical plan."
-	return "Yeah, we can chat. Tell me your goal in plain language, and I’ll help you shape it into actionable next steps."
 
 
 def _extract_prefixed_value(text: str, label: str) -> str:
