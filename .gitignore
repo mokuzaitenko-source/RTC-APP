@@ -22,3 +22,6 @@ Thumbs.db
 
 # Local scratch artifacts
 tmp_*.txt
+.playwright-cli/
+all caht.txt
+propmting book.txt

@@ -81,8 +81,36 @@ class AssistantProviderTests(TestCase):
 		):
 			catalog = assistant_service.list_models()
 		self.assertEqual(catalog["provider_mode"], "local")
+		self.assertEqual(catalog["effective_provider_mode"], "local")
+		self.assertTrue(catalog["provider_ready"])
+		self.assertEqual(catalog["provider_warnings"], [])
 		self.assertEqual(catalog["default_model"], "gpt-4.1-mini")
 		self.assertEqual(catalog["models"], ["gpt-4.1-mini", "gpt-4o-mini"])
+
+	def test_model_catalog_openai_without_key_reports_not_ready(self) -> None:
+		with patch.dict(
+			os.environ,
+			{"ASSISTANT_PROVIDER_MODE": "openai", "ASSISTANT_OPENAI_MODELS": "gpt-4.1-mini"},
+			clear=False,
+		):
+			os.environ.pop("OPENAI_API_KEY", None)
+			catalog = assistant_service.list_models()
+		self.assertEqual(catalog["provider_mode"], "openai")
+		self.assertEqual(catalog["effective_provider_mode"], "openai")
+		self.assertFalse(catalog["provider_ready"])
+		self.assertGreaterEqual(len(catalog["provider_warnings"]), 1)
+
+	def test_model_catalog_auto_without_key_reports_local_effective_mode(self) -> None:
+		with patch.dict(
+			os.environ,
+			{"ASSISTANT_PROVIDER_MODE": "auto", "ASSISTANT_OPENAI_MODELS": "gpt-4.1-mini"},
+			clear=False,
+		):
+			os.environ.pop("OPENAI_API_KEY", None)
+			catalog = assistant_service.list_models()
+		self.assertEqual(catalog["provider_mode"], "auto")
+		self.assertEqual(catalog["effective_provider_mode"], "local")
+		self.assertTrue(catalog["provider_ready"])
 
 	def test_openai_provider_invalid_json_raises_provider_error(self) -> None:
 		client = _FakeClient(output_text="not-json")

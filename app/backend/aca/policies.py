@@ -13,6 +13,13 @@ _PROMPT_INJECTION_PATTERNS = [
 	r"tool call",
 ]
 
+_UNTRUSTED_TOOL_OUTPUT_PATTERNS = [
+	r"tool output: .*ignore",
+	r"retrieved content: .*override",
+	r"search result: .*run this command",
+	r"function result: .*exfiltrate",
+]
+
 _SENSITIVE_TEXT_PATTERNS: List[tuple[str, str]] = [
 	(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", "[redacted_email]"),
 	(r"\b\d{3}-\d{2}-\d{4}\b", "[redacted_ssn]"),
@@ -40,6 +47,11 @@ def detect_prompt_injection(text: str) -> bool:
 	return any(re.search(pattern, content, re.IGNORECASE) for pattern in _PROMPT_INJECTION_PATTERNS)
 
 
+def detect_untrusted_tool_instruction(text: str) -> bool:
+	content = text.lower()
+	return any(re.search(pattern, content, re.IGNORECASE) for pattern in _UNTRUSTED_TOOL_OUTPUT_PATTERNS)
+
+
 def sanitize_memory_text(text: str, *, max_chars: int = 4000) -> str:
 	result = text
 	for pattern, replacement in _SENSITIVE_TEXT_PATTERNS:
@@ -65,4 +77,3 @@ def filter_safe_metadata(metadata: Dict[str, object]) -> Dict[str, object]:
 def output_is_safe(text: str) -> bool:
 	content = text.lower()
 	return not any(re.search(pattern, content, re.IGNORECASE) for pattern in _UNSAFE_OUTPUT_PATTERNS)
-

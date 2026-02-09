@@ -54,6 +54,9 @@ def models(request: Request):
 			"models": catalog["models"],
 			"default_model": catalog["default_model"],
 			"provider_mode": catalog["provider_mode"],
+			"effective_provider_mode": catalog.get("effective_provider_mode", catalog["provider_mode"]),
+			"provider_ready": catalog.get("provider_ready", True),
+			"provider_warnings": catalog.get("provider_warnings", []),
 		},
 	)
 

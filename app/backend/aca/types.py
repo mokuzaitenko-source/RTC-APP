@@ -62,6 +62,7 @@ class ACAState:
 	decision_graph: List[Dict[str, Any]] = field(default_factory=list)
 	module_outputs: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 	prompt_injection_detected: bool = False
+	untrusted_tool_instruction_detected: bool = False
 	quality_score: float = 0.0
 	safety: Dict[str, Any] = field(default_factory=dict)
 	fallback: Dict[str, Any] = field(default_factory=dict)

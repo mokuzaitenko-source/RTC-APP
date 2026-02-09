@@ -80,23 +80,37 @@ def run_m0_safety_memory_guard(state: ACAState) -> None:
     state.working_context = context or None
     combo = f"{state.working_input}\n{context}".strip()
     state.prompt_injection_detected = policies.detect_prompt_injection(combo)
-    if state.prompt_injection_detected:
+    state.untrusted_tool_instruction_detected = policies.detect_untrusted_tool_instruction(combo)
+    if state.prompt_injection_detected or state.untrusted_tool_instruction_detected:
         state.meta_policy["safety_override"] = True
     state.safety = {
-        "input_safe": not state.prompt_injection_detected,
+        "input_safe": not (state.prompt_injection_detected or state.untrusted_tool_instruction_detected),
         "prompt_injection_detected": state.prompt_injection_detected,
+        "untrusted_tool_instruction_detected": state.untrusted_tool_instruction_detected,
         "output_safe": True,
         "blocked": False,
-        "threat_level": "high" if state.prompt_injection_detected else "low",
+        "threat_level": "high" if (state.prompt_injection_detected or state.untrusted_tool_instruction_detected) else "low",
     }
-    _set_output(state, "M0", {"prompt_injection_detected": state.prompt_injection_detected, "memory_policy": "session_sanitized_only"})
+    _set_output(
+        state,
+        "M0",
+        {
+            "prompt_injection_detected": state.prompt_injection_detected,
+            "untrusted_tool_instruction_detected": state.untrusted_tool_instruction_detected,
+            "memory_policy": "session_sanitized_only",
+        },
+    )
     _append_trace(
         state,
         module_id="M0",
         module_name="SafetyMemoryGuard",
         tier="tier0_safety",
-        status="adjusted" if state.prompt_injection_detected else "pass",
-        detail="Prompt-injection detected; safety override engaged." if state.prompt_injection_detected else "Input and memory checks passed.",
+        status="adjusted" if (state.prompt_injection_detected or state.untrusted_tool_instruction_detected) else "pass",
+        detail=(
+            "Prompt-injection or untrusted tool-instruction detected; safety override engaged."
+            if (state.prompt_injection_detected or state.untrusted_tool_instruction_detected)
+            else "Input and memory checks passed."
+        ),
     )
 
 
@@ -305,11 +319,36 @@ def _injection_safe_result(state: ACAState) -> Dict[str, object]:
 
 
 def run_m14_eve_core(state: ACAState, build_result: BuildResultFn) -> None:
-    if state.prompt_injection_detected:
+    if state.prompt_injection_detected or state.untrusted_tool_instruction_detected:
         state.result = _injection_safe_result(state)
+        if state.untrusted_tool_instruction_detected:
+            fallback = state.result.get("fallback")
+            if isinstance(fallback, dict):
+                fallback["reason_code"] = "untrusted_tool_instruction_detected"
+                fallback["notes"] = list(dict.fromkeys([*(fallback.get("notes") or []), "tool_output_treated_as_untrusted_data"]))
         state.fallback = dict(state.result.get("fallback") or {})
-        _set_output(state, "M14", {"provider_executed": False, "provider_mode": state.request.provider_mode, "model": state.request.model, "reason": "prompt_injection_detected"})
-        _append_trace(state, module_id="M14", module_name="EveCore", tier="tier3_operational", status="fallback", detail="Provider execution skipped due to prompt-injection safety override.")
+        _set_output(
+            state,
+            "M14",
+            {
+                "provider_executed": False,
+                "provider_mode": state.request.provider_mode,
+                "model": state.request.model,
+                "reason": (
+                    "untrusted_tool_instruction_detected"
+                    if state.untrusted_tool_instruction_detected
+                    else "prompt_injection_detected"
+                ),
+            },
+        )
+        _append_trace(
+            state,
+            module_id="M14",
+            module_name="EveCore",
+            tier="tier3_operational",
+            status="fallback",
+            detail="Provider execution skipped due to safety override.",
+        )
         return
 
     result = build_result(
@@ -481,6 +520,10 @@ def run_m20_fallback_manager(state: ACAState) -> None:
         reason_code = "prompt_injection_detected"
         strategy = "safety_clarify"
         triggered = True
+    elif state.untrusted_tool_instruction_detected:
+        reason_code = "untrusted_tool_instruction_detected"
+        strategy = "ignore_untrusted_tool_output_and_clarify"
+        triggered = True
     elif state.meta_policy.get("integrity_fail"):
         reason_code = "integrity_check_failed"
         strategy = "clarify_missing_requirements"
@@ -622,3 +665,4 @@ def run_m23_interface_layer(state: ACAState) -> None:
     result["module_outputs"] = state.module_outputs
     state.result = result
     _append_trace(state, module_id="M23", module_name="InterfaceLayer", tier="tier3_operational", status="pass", detail="Final interface payload normalized.")
+

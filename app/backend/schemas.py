@@ -118,4 +118,5 @@ class AssistantV2ResponseData(BaseModel):
 	intake_frame: Dict[str, Any] = Field(default_factory=dict)
 	adaptive_defaults: Dict[str, Any] = Field(default_factory=dict)
 	adaptive_evolution: List[Dict[str, Any]] = Field(default_factory=list)
+	runtime_metrics: Dict[str, Any] = Field(default_factory=dict)
 	trace: Optional[List[ACATraceEvent]] = None
