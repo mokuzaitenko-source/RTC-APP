@@ -3,470 +3,33 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Oversight Assistant</title>
+  <title>RTC Assistant</title>
   <link rel="icon" type="image/svg+xml" href="/app/favicon.svg">
   <link rel="shortcut icon" href="/app/favicon.svg">
-  <style>
-    :root {
-      --bg-0: #f4f7f1;
-      --bg-1: #e5ece5;
-      --panel: #ffffff;
-      --ink: #12202b;
-      --ink-soft: #445867;
-      --line: #cdd7cf;
-      --accent: #0f6d7a;
-      --ok: #1b7a3f;
-      --shadow: 0 14px 34px rgba(16, 29, 36, 0.12);
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      color: var(--ink);
-      font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
-      background:
-        radial-gradient(circle at 16% 12%, #d7e9e1 0%, transparent 34%),
-        radial-gradient(circle at 82% 16%, #ffe9c9 0%, transparent 28%),
-        linear-gradient(180deg, var(--bg-0), var(--bg-1));
-    }
-
-    .shell {
-      max-width: 980px;
-      margin: 0 auto;
-      padding: 14px;
-      display: grid;
-      gap: 12px;
-    }
-
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 14px;
-      box-shadow: var(--shadow);
-      padding: 14px;
-    }
-
-    .header {
-      border-left: 5px solid var(--accent);
-      display: grid;
-      gap: 8px;
-    }
-
-    .title {
-      margin: 0;
-      font-size: 1.28rem;
-      letter-spacing: 0.02em;
-    }
-
-    .subtitle {
-      margin: 0;
-      color: var(--ink-soft);
-      font-size: 0.92rem;
-      line-height: 1.45;
-    }
-
-    .head-row {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      flex-wrap: wrap;
-    }
-
-    .status {
-      margin: 0;
-      color: var(--ink-soft);
-      font-size: 0.82rem;
-      font-family: "IBM Plex Mono", "Cascadia Code", monospace;
-      white-space: pre-wrap;
-    }
-
-    .toolbar {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      flex-wrap: wrap;
-    }
-
-    button,
-    select,
-    textarea {
-      font: inherit;
-    }
-
-    button {
-      border: 1px solid var(--line);
-      border-radius: 999px;
-      background: #fff;
-      color: var(--ink);
-      padding: 8px 12px;
-      font-size: 0.86rem;
-      font-weight: 700;
-      cursor: pointer;
-    }
-
-    button.primary {
-      border-color: var(--accent);
-      background: var(--accent);
-      color: #fff;
-    }
-
-    button:disabled {
-      opacity: 0.55;
-      cursor: not-allowed;
-    }
-
-    .chat-wrap {
-      display: grid;
-      gap: 10px;
-    }
-
-    .thread {
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: #f9fcfa;
-      padding: 12px;
-      display: grid;
-      gap: 9px;
-      max-height: 58vh;
-      overflow: auto;
-      align-content: start;
-    }
-
-    .empty {
-      border: 1px dashed var(--line);
-      border-radius: 10px;
-      background: #fff;
-      padding: 12px;
-      color: var(--ink-soft);
-      font-size: 0.86rem;
-      line-height: 1.5;
-    }
-
-    .row {
-      display: flex;
-    }
-
-    .row.user { justify-content: flex-end; }
-    .row.assistant { justify-content: flex-start; }
-
-    .bubble {
-      max-width: min(760px, 100%);
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: #fff;
-      padding: 10px;
-      display: grid;
-      gap: 6px;
-      box-shadow: 0 2px 10px rgba(17, 34, 27, 0.08);
-    }
-
-    .row.user .bubble {
-      border-color: #90c4cd;
-      background: #eaf7f9;
-    }
-
-    .role {
-      margin: 0;
-      color: var(--ink-soft);
-      font-size: 0.68rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      font-weight: 800;
-    }
-
-    .text {
-      margin: 0;
-      color: var(--ink-soft);
-      font-size: 0.84rem;
-      line-height: 1.5;
-      font-family: "IBM Plex Mono", "Cascadia Code", monospace;
-      white-space: pre-wrap;
-    }
-
-    .streaming-caret {
-      display: inline-block;
-      width: 8px;
-      height: 14px;
-      margin-left: 4px;
-      background: var(--accent);
-      animation: blink 900ms step-end infinite;
-      vertical-align: text-bottom;
-    }
-
-    @keyframes blink {
-      50% { opacity: 0.15; }
-    }
-
-    .composer {
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: #fff;
-      padding: 10px;
-      display: grid;
-      gap: 9px;
-    }
-
-    .composer label {
-      display: grid;
-      gap: 4px;
-      color: var(--ink-soft);
-      font-size: 0.76rem;
-      font-weight: 800;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-    }
-
-    textarea,
-    select {
-      width: 100%;
-      border: 1px solid var(--line);
-      border-radius: 9px;
-      background: #fff;
-      color: var(--ink);
-      padding: 8px 10px;
-      font-size: 0.9rem;
-    }
-
-    textarea {
-      min-height: 108px;
-      resize: vertical;
-    }
-
-    .compose-row {
-      display: grid;
-      grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
-      gap: 8px;
-      align-items: end;
-    }
-
-    .chip-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      align-items: center;
-    }
-
-    .chip-label {
-      margin: 0;
-      color: var(--ink-soft);
-      font-size: 0.76rem;
-      font-family: "IBM Plex Mono", "Cascadia Code", monospace;
-    }
-
-    .chip {
-      border-radius: 999px;
-      border: 1px solid var(--line);
-      background: #f8fbf9;
-      color: var(--ink-soft);
-      padding: 5px 10px;
-      font-size: 0.75rem;
-      font-weight: 700;
-    }
-
-    .chip.ok {
-      border-color: #97d5ad;
-      background: #eef8f1;
-      color: var(--ok);
-    }
-
-    .chip.warning {
-      border-color: #f2c189;
-      background: #fff3e6;
-      color: #8a4b00;
-    }
-
-    .trace-panel {
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: #fbfcff;
-      padding: 10px;
-      display: grid;
-      gap: 8px;
-    }
-
-    .trace-panel[hidden] {
-      display: none;
-    }
-
-    .trace-title {
-      margin: 0;
-      font-size: 0.82rem;
-      color: var(--ink-soft);
-      font-weight: 800;
-      letter-spacing: 0.03em;
-      text-transform: uppercase;
-    }
-
-    .trace-list {
-      margin: 0;
-      padding: 0;
-      list-style: none;
-      display: grid;
-      gap: 6px;
-      max-height: 170px;
-      overflow: auto;
-    }
-
-    .trace-item {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fff;
-      padding: 6px 8px;
-      display: grid;
-      gap: 2px;
-      font-size: 0.76rem;
-      color: var(--ink-soft);
-      font-family: "IBM Plex Mono", "Cascadia Code", monospace;
-    }
-
-    .trace-meta {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      font-weight: 700;
-      color: var(--ink);
-    }
-
-    .overlay[hidden] { display: none; }
-
-    .overlay {
-      position: fixed;
-      inset: 0;
-      background: rgba(7, 16, 24, 0.38);
-      display: grid;
-      place-items: center;
-      padding: 14px;
-      z-index: 20;
-    }
-
-    .dialog {
-      width: min(760px, 100%);
-      max-height: 82vh;
-      overflow: auto;
-      border-left: 5px solid var(--accent);
-    }
-
-    .dialog-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 10px;
-      margin-bottom: 8px;
-    }
-
-    .dialog-head h2 {
-      margin: 0;
-      font-size: 1rem;
-    }
-
-    .help-copy {
-      margin: 8px 0;
-      color: var(--ink-soft);
-      font-size: 0.86rem;
-      line-height: 1.45;
-    }
-
-    .help-jump {
-      margin-top: 6px;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-
-    .help-jump button {
-      border-radius: 8px;
-      padding: 5px 8px;
-      font-size: 0.74rem;
-      font-weight: 700;
-    }
-
-    .help-section {
-      border: 1px solid var(--line);
-      border-radius: 10px;
-      background: #fff;
-      padding: 10px;
-      margin-top: 8px;
-    }
-
-    .help-section h3 {
-      margin: 0;
-      font-size: 0.92rem;
-    }
-
-    .help-list {
-      margin: 8px 0 0 18px;
-      padding: 0;
-      color: var(--ink-soft);
-      font-size: 0.84rem;
-      line-height: 1.45;
-    }
-
-    .help-checklist {
-      margin-top: 8px;
-      display: grid;
-      gap: 7px;
-    }
-
-    .help-check-item {
-      border: 1px solid var(--line);
-      border-radius: 8px;
-      background: #fbfdfb;
-      padding: 7px 8px;
-      display: grid;
-      gap: 6px;
-    }
-
-    .help-check-head {
-      display: flex;
-      gap: 8px;
-      align-items: flex-start;
-    }
-
-    .help-check-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-    }
-
-    .toggle-row {
-      margin-top: 10px;
-      display: flex;
-      gap: 8px;
-      align-items: center;
-      color: var(--ink-soft);
-      font-size: 0.84rem;
-    }
-
-    .welcome {
-      width: min(620px, 100%);
-      border-left: 5px solid var(--ok);
-    }
-
-    @media (max-width: 860px) {
-      .compose-row {
-        grid-template-columns: 1fr;
-      }
-    }
-  </style>
+  <link rel="stylesheet" href="/app/theme.tokens.css">
+  <link rel="stylesheet" href="/app/theme.base.css">
+  <link rel="stylesheet" href="/app/theme.components.css">
+  <link rel="stylesheet" href="/app/theme.page-assistant.css">
 </head>
-<body>
+<body data-page="assistant">
   <main class="shell" aria-label="Assistant Workspace">
+    <section class="panel top-nav" aria-label="Global Navigation">
+      <p class="brand">RTC App</p>
+      <nav class="nav-links">
+        <a class="nav-link" href="/">Hub</a>
+        <a class="nav-link active" href="/app" aria-current="page">Assistant</a>
+        <a class="nav-link" href="/learn">Coach</a>
+      </nav>
+    </section>
     <section class="panel header">
       <div class="head-row">
         <div>
-          <h1 class="title">Oversight Assistant</h1>
-          <p class="subtitle">Assistant-first workspace with streaming responses, practical planning, and memory across refreshes.</p>
+          <h1 class="title">RTC Assistant</h1>
+          <p class="subtitle">Chat-first workspace for planning, debugging, and execution with session memory.</p>
         </div>
         <div class="toolbar">
           <span id="assistantApiBadge" class="chip">API V1</span>
           <span id="assistantProviderBadge" class="chip">Provider: --</span>
-          <label class="chip" title="Show ACA module trace">
-            <input id="chatTraceToggle" type="checkbox" />
-            ACA Trace
-          </label>
           <button id="assistantOpenHelp" data-allow-busy="true">Help</button>
         </div>
       </div>
@@ -478,7 +41,7 @@
       <form id="chatForm" class="composer">
         <label for="chatInput">
           Ask Assistant
-          <textarea id="chatInput" placeholder="Example: Build me a practical 2-week MVP plan with milestones and acceptance criteria."></textarea>
+          <textarea id="chatInput" placeholder="Example: Build me a practical 2-week MVP plan with milestones, acceptance checks, and fallback steps."></textarea>
         </label>
         <div class="compose-row">
           <label for="chatRisk">
@@ -517,8 +80,10 @@
         <div class="chip-row">
           <p class="chip-label">Quick prompts:</p>
           <button type="button" class="chip" data-role="chat-prompt" data-prompt="Turn my goal into a 5-step execution plan with acceptance checks.">5-step plan</button>
+          <button type="button" class="chip" data-role="chat-prompt" data-prompt="Can we chat for 2 minutes? Help me clarify what I should build first.">Start a chat</button>
           <button type="button" class="chip" data-role="chat-prompt" data-prompt="Refine your previous answer to reduce risk and add fallback steps.">Refine with fallback</button>
           <button type="button" class="chip" data-role="chat-prompt" data-prompt="Create an implementation brief with scope, milestones, risks, and tests.">Implementation brief</button>
+          <button type="button" class="chip" data-role="chat-prompt" data-prompt="Review this like a hiring manager and list top 5 gaps with fixes and measurable impact.">Hiring-manager review</button>
         </div>
       </form>
       <section id="acaTracePanel" class="trace-panel" hidden>
@@ -534,7 +99,7 @@
         <h2 id="helpTitle">Assistant Help</h2>
         <button id="closeHelp" data-allow-busy="true">Close</button>
       </div>
-      <p class="help-copy">Do this next: write your goal, set risk tolerance, click Ask, then iterate with follow-ups.</p>
+      <p class="help-copy">Do this next: write your goal in plain language, click Ask, then iterate until the output is execution-ready.</p>
 
       <div class="help-jump">
         <button data-role="help-jump" data-help-section="quick-start">Quick Start</button>
@@ -547,7 +112,7 @@
         <h3>Quick Start (90 seconds)</h3>
         <ul class="help-list">
           <li>Describe your target outcome in one plain sentence.</li>
-          <li>Set risk tolerance before asking when tradeoffs matter.</li>
+          <li>Add one constraint (time, stack, or scope) and one success check.</li>
           <li>Ask one follow-up to tighten scope, format, or quality.</li>
         </ul>
       </section>
@@ -556,7 +121,7 @@
         <h3>Core Workflow</h3>
         <ul class="help-list">
           <li>Start with objective plus constraints.</li>
-          <li>Request a concrete plan with acceptance checks.</li>
+          <li>Request a concrete plan with acceptance checks and fallback behavior.</li>
           <li>Ask for revision until output is execution-ready.</li>
         </ul>
       </section>
@@ -567,6 +132,7 @@
           <li><strong>Ask:</strong> generate a response for current prompt.</li>
           <li><strong>Clear:</strong> reset visible chat thread.</li>
           <li><strong>Help:</strong> reopen guidance and quick actions.</li>
+          <li><strong>Response Format:</strong> force output style (concise plan, implementation brief, debugging checklist).</li>
         </ul>
       </section>
 
@@ -634,7 +200,8 @@
         <h3>Troubleshooting</h3>
         <ul class="help-list">
           <li>If output is generic, add timeline, constraints, and success criteria.</li>
-          <li>If output is too long, ask for a fixed number of steps.</li>
+          <li>If assistant asks a clarify question, answer it directly in one line and ask again.</li>
+          <li>If output is too long, request a fixed number of steps (for example, "5-step plan").</li>
           <li>If provider errors appear, verify API key and provider mode.</li>
         </ul>
       </section>
@@ -649,13 +216,14 @@
   <div id="welcomeOverlay" class="overlay" hidden>
     <section class="panel welcome" role="dialog" aria-modal="true" aria-labelledby="welcomeTitle">
       <div class="dialog-head">
-        <h2 id="welcomeTitle">Welcome To Oversight Assistant</h2>
+        <h2 id="welcomeTitle">Welcome To RTC Assistant</h2>
         <button id="closeWelcome">Skip</button>
       </div>
       <p class="help-copy">Talk naturally. Ask for plans, revisions, and implementation briefs. The assistant keeps context by session.</p>
       <ul class="help-list">
         <li>State your goal and constraints clearly.</li>
         <li>Set risk tolerance before you ask.</li>
+        <li>If a clarification appears, answer it briefly and continue.</li>
         <li>Iterate with follow-up prompts until it is actionable.</li>
       </ul>
       <div class="toolbar">
@@ -667,3 +235,4 @@
   <script src="/app/app.js"></script>
 </body>
 </html>
+

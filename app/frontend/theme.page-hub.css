@@ -1,0 +1,97 @@
+body[data-page="hub"] .hero {
+  display: grid;
+  gap: 10px;
+  border-top: 4px solid var(--brand);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-soft) 82%, black), color-mix(in srgb, var(--surface) 90%, black));
+}
+
+body[data-page="hub"] .hero h1 {
+  font-size: clamp(1.34rem, 1.1rem + 0.95vw, 1.78rem);
+}
+
+body[data-page="hub"] .hero p {
+  max-width: 68ch;
+}
+
+body[data-page="hub"] .hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+body[data-page="hub"] .compare {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+body[data-page="hub"] .mode {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+  background: color-mix(in srgb, var(--surface) 90%, black);
+}
+
+body[data-page="hub"] .mode h3 {
+  font-size: var(--text-md);
+}
+
+body[data-page="hub"] .mode p {
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+body[data-page="hub"] .mode ul {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+body[data-page="hub"] .launcher-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+body[data-page="hub"] .card {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  background: color-mix(in srgb, var(--surface-soft) 84%, black);
+  display: grid;
+  gap: 6px;
+}
+
+body[data-page="hub"] .card p {
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  line-height: 1.45;
+}
+
+@media (max-width: 1150px) {
+  body[data-page="hub"] .compare,
+  body[data-page="hub"] .launcher-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  body[data-page="hub"] .compare .mode:last-child {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 820px) {
+  body[data-page="hub"] .compare,
+  body[data-page="hub"] .launcher-grid {
+    grid-template-columns: 1fr;
+  }
+
+  body[data-page="hub"] .compare .mode:last-child {
+    grid-column: auto;
+  }
+}

@@ -85,6 +85,15 @@ _TASK_MARKERS = _OBJECTIVE_VERBS | {
 	"milestone",
 	"roadmap",
 }
+_TASK_PHRASES = {
+	"acceptance criteria",
+	"success criteria",
+	"implementation brief",
+	"mvp",
+	"api",
+	"feature",
+	"bug",
+}
 
 _RISK_TOKENS = {"auth", "payment", "security", "privacy", "legal", "medical", "finance", "production"}
 _GOVERNED_RISK_TOKENS = {
@@ -264,70 +273,55 @@ def _tokenize(text: str) -> List[str]:
 
 
 def _has_task_markers(tokens: List[str]) -> bool:
-	return bool(set(tokens) & _TASK_MARKERS) or any(
-		phrase in " ".join(tokens)
-		for phrase in [
-			"acceptance criteria",
-			"success criteria",
-			"implementation brief",
-			"roadmap",
-			"mvp",
-			"api",
-			"feature",
-			"bug",
-		]
-	)
+	return bool(set(tokens) & _TASK_MARKERS)
+
+
+def _has_task_phrases(text: str) -> bool:
+	lowered = text.lower()
+	for phrase in _TASK_PHRASES:
+		pattern = r"\b" + re.escape(phrase).replace(r"\ ", r"\s+") + r"\b"
+		if re.search(pattern, lowered):
+			return True
+	return False
 
 
 def _detect_interaction_mode(user_input: str, context: str | None) -> Literal["conversation", "task"]:
-	combined = _combined_text(user_input, context).lower().strip()
-	tokens = set(_tokenize(combined))
-	has_task_markers = bool(tokens & _TASK_MARKERS) or any(
-		phrase in combined
-		for phrase in [
-			"acceptance criteria",
-			"success criteria",
-			"implementation brief",
-			"roadmap",
-			"mvp",
-			"api",
-			"feature",
-			"bug",
-		]
-	)
-	has_conversation_markers = bool(tokens & _CONVERSATION_TOKENS) or any(
-		phrase in combined for phrase in _CONVERSATION_PHRASES
-	)
-	if has_conversation_markers and not has_task_markers:
+	user_text = " ".join(user_input.split()).strip().lower()
+	user_tokens = _tokenize(user_text)
+	if _has_task_markers(user_tokens) or _has_task_phrases(user_text):
+		return "task"
+	if not user_text:
+		if isinstance(context, str) and context.strip():
+			context_text = context.lower()
+			context_tokens = _tokenize(context_text)
+			if _has_task_markers(context_tokens) or _has_task_phrases(context_text):
+				return "task"
+			if set(context_tokens) & _CONVERSATION_TOKENS:
+				return "conversation"
+			if any(phrase in context_text for phrase in _CONVERSATION_PHRASES):
+				return "conversation"
 		return "conversation"
-	if len(tokens) <= 4 and not has_task_markers and not any(ch.isdigit() for ch in combined):
+	if set(user_tokens) & _CONVERSATION_TOKENS:
 		return "conversation"
+	if any(phrase in user_text for phrase in _CONVERSATION_PHRASES):
+		return "conversation"
+	if isinstance(context, str) and context.strip():
+		context_text = context.lower()
+		context_tokens = _tokenize(context_text)
+		if _has_task_markers(context_tokens) or _has_task_phrases(context_text):
+			return "task"
 	return "task"
 
 
 def _conversation_response(user_input: str) -> str:
-	text = user_input.lower()
-	if any(phrase in text for phrase in ["how are you", "what's up", "whats up"]):
-		return "I'm here and ready. Tell me what you want to build, fix, or plan, and I'll help step by step."
-	if "thanks" in text or "thank" in text:
-		return "Anytime. If you want, give me your goal and constraints and I'll turn it into a practical plan."
-	return "Yeah, we can chat. Tell me your goal in plain language, and I'll help you shape it into actionable next steps."
-
-
-def _has_task_markers(tokens: List[str]) -> bool:
-	return bool(set(tokens) & _TASK_MARKERS)
-
-
-def _detect_interaction_mode(user_input: str, context: str | None) -> str:
-	combined = _combined_text(user_input, context).lower()
-	tokens = _tokenize(combined)
-	if _has_task_markers(tokens):
-		return "task"
-	if set(tokens) & _CONVERSATION_TOKENS:
-		return "conversation"
-	if any(phrase in combined for phrase in _CONVERSATION_PHRASES):
-		return "conversation"
-	return "task"
+	text = " ".join(user_input.split()).strip()
+	if not text:
+		return "Hey. I'm here. What do you want to work on?"
+	if any(phrase in text.lower() for phrase in ["how are you", "what's up", "whats up"]):
+		return "I'm ready. Tell me what you want to build, fix, or decide, and we'll work it step by step."
+	if any(token in _tokenize(text) for token in {"thanks", "thank"}):
+		return "You're welcome. Want to keep going or switch tasks?"
+	return "Yeah, we can chat. Tell me your goal in plain language and I will help you make it actionable."
 
 
 def _ambiguity_score(user_input: str, context: str | None) -> Tuple[float, List[str]]:
@@ -522,15 +516,6 @@ def _quick_contract_response(
 	)
 
 
-def _conversation_response(user_input: str) -> str:
-	text = " ".join(user_input.split()).strip()
-	if not text:
-		return "Hey. I'm here. What do you want to work on?"
-	if any(token in _tokenize(text) for token in {"thanks", "thank"}):
-		return "You're welcome. Want to keep going or switch tasks?"
-	return "Hey. I'm here. Tell me what you want to build, fix, or decide."
-
-
 def _governed_clarify_response(questions: List[str]) -> str:
 	lines = [
 		"Governed lane is active. I need clarification before execution:",
@@ -645,8 +630,9 @@ def _apply_adaptive_protocol(
 		)
 		local_ambiguity, ambiguity_notes = _ambiguity_score(user_input, context)
 		interaction_mode = _detect_interaction_mode(user_input, context)
-		combined_tokens = _tokenize(_combined_text(user_input, context))
-		is_task_request = _has_task_markers(combined_tokens)
+		requested_step_count = _requested_step_count(user_input)
+		user_tokens = _tokenize(user_input)
+		is_task_request = _has_task_markers(user_tokens) or _has_task_phrases(user_input)
 		ambiguous_terms_present = any(note.startswith("ambiguous_terms") for note in ambiguity_notes)
 		forced_lane = _forced_lane_override(user_input, context)
 		complexity_reasons = _complexity_reasons(
@@ -728,6 +714,29 @@ def _apply_adaptive_protocol(
 				}
 			]
 			result["assumptions"] = []
+
+		if (
+			requested_step_count is not None
+			and interaction_mode != "conversation"
+			and result.get("mode") == "plan_execute"
+		):
+			plan = result.get("plan")
+			plan_items = _string_list(plan, limit=16) if isinstance(plan, list) else []
+			if not plan_items:
+				plan_items = _make_plan(user_input, context, risk_tolerance)
+			plan_items = _enforce_step_count(plan_items, requested_step_count)
+			result["plan"] = plan_items
+			result["candidate_response"] = _compose_candidate_response(
+				plan_items,
+				user_input,
+				risk_tolerance,
+			)
+			result["quality"] = _score_quality(
+				candidate_response=str(result["candidate_response"]),
+				plan=plan_items,
+				user_input=user_input,
+				recommended_questions=[],
+			)
 
 		missing_decision_keys: List[str] = []
 		if "No explicit constraints provided" in " ".join(intake_frame.get("constraints", [])):
@@ -814,6 +823,55 @@ def _fallback_policy_text(risk_tolerance: RiskTolerance) -> str:
 	if risk_tolerance == "high":
 		return "allow one alternate strategy retry, then return the safest useful response if checks still fail."
 	return "retry once with a simplified strategy, then ask for clarification if checks still fail."
+
+
+def _requested_step_count(text: str) -> int | None:
+	lowered = text.lower()
+	digit_match = re.search(r"\b(\d{1,2})\s*[\-\u2010-\u2015 ]?\s*step(?:s)?\b", lowered)
+	if digit_match:
+		value = int(digit_match.group(1))
+		if 2 <= value <= 12:
+			return value
+	word_to_value = {
+		"two": 2,
+		"three": 3,
+		"four": 4,
+		"five": 5,
+		"six": 6,
+		"seven": 7,
+		"eight": 8,
+		"nine": 9,
+		"ten": 10,
+		"eleven": 11,
+		"twelve": 12,
+	}
+	word_match = re.search(
+		r"\b(two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s*[\-\u2010-\u2015 ]?\s*step(?:s)?\b",
+		lowered,
+	)
+	if word_match:
+		return word_to_value[word_match.group(1)]
+	return None
+
+
+def _enforce_step_count(plan: List[str], target_count: int) -> List[str]:
+	if target_count <= 0:
+		return plan
+	normalized = _dedupe_steps(plan)
+	if not normalized:
+		return normalized
+	fallback_step = next((step for step in normalized if "fallback" in step.lower()), "")
+	if len(normalized) > target_count:
+		normalized = normalized[:target_count]
+		if fallback_step and fallback_step not in normalized:
+			normalized[-1] = fallback_step
+		return _dedupe_steps(normalized)
+	if len(normalized) < target_count:
+		while len(normalized) < target_count:
+			normalized.append(
+				"Execution step: implement the next smallest testable increment and confirm one acceptance check."
+			)
+	return _dedupe_steps(normalized)
 
 
 def _default_prompt_book_steps(context: str | None, risk_tolerance: RiskTolerance) -> List[str]:

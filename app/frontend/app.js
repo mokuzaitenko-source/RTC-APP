@@ -24,7 +24,7 @@ const state = {
     output_format: "default",
     model: "",
     models: [],
-    aca_trace_enabled: false,
+    aca_trace_enabled: true,
     last_trace: [],
     provider_status: {
       provider_mode: "",
@@ -150,7 +150,7 @@ function loadState() {
         ? parsed.chat.output_format
         : "default";
       state.chat.model = typeof parsed.chat.model === "string" ? parsed.chat.model : "";
-      state.chat.aca_trace_enabled = Boolean(parsed.chat.aca_trace_enabled);
+      state.chat.aca_trace_enabled = true;
       state.chat.last_trace = Array.isArray(parsed.chat.last_trace) ? parsed.chat.last_trace : [];
     }
     if (parsed.help && typeof parsed.help === "object") {
@@ -169,7 +169,7 @@ function loadState() {
     state.chat.api_version = "v1";
     state.chat.output_format = "default";
     state.chat.model = "";
-    state.chat.aca_trace_enabled = false;
+    state.chat.aca_trace_enabled = true;
     state.chat.last_trace = [];
     state.help = {
       checklist_progress: {},

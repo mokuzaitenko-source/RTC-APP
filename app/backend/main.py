@@ -18,6 +18,7 @@ from app.backend.routers import actions, assistant, export, findings, health, op
 
 _FRONTEND_DIR = Path(__file__).resolve().parents[1] / "frontend"
 _LANDING_PATH = _FRONTEND_DIR / "landing.html"
+_LEARN_PATH = _FRONTEND_DIR / "learn.html"
 
 
 def create_app() -> FastAPI:
@@ -55,6 +56,12 @@ def _register_routers(app: FastAPI) -> None:
 		def serve_root():
 			if _LANDING_PATH.exists():
 				return FileResponse(str(_LANDING_PATH))
+			return RedirectResponse(url="/app")
+
+		@app.get("/learn", include_in_schema=False)
+		def serve_learn():
+			if _LEARN_PATH.exists():
+				return FileResponse(str(_LEARN_PATH))
 			return RedirectResponse(url="/app")
 
 	app.include_router(ops.router)

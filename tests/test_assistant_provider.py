@@ -96,6 +96,25 @@ class AssistantProviderTests(TestCase):
 		self.assertEqual(result.get("interaction_mode"), "conversation")
 		self.assertEqual(result.get("recommended_questions"), [])
 
+	def test_requested_five_step_plan_is_enforced(self) -> None:
+		with patch.dict(
+			os.environ,
+			{"ASSISTANT_PROVIDER_MODE": "local", "ASSISTANT_OPENAI_MODELS": "gpt-4.1-mini"},
+			clear=False,
+		):
+			result = assistant_service.respond(
+				user_input="Turn my goal into a 5-step execution plan with acceptance checks.",
+				context="Goal: ship an MVP quickly",
+			)
+		self.assertEqual(result.get("mode"), "plan_execute")
+		plan = result.get("plan")
+		self.assertIsInstance(plan, list)
+		self.assertEqual(len(plan), 5)
+		candidate = str(result.get("candidate_response", ""))
+		self.assertIn("1.", candidate)
+		self.assertIn("5.", candidate)
+		self.assertNotIn("6.", candidate)
+
 	def test_model_catalog_returns_allowlist(self) -> None:
 		with patch.dict(
 			os.environ,

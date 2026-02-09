@@ -121,7 +121,7 @@ class ApiContractsTests(TestCase):
 		response = self.client.get("/app")
 		self.assertEqual(response.status_code, 200)
 		body = response.text
-		self.assertIn("Oversight Assistant", body)
+		self.assertIn("RTC Assistant", body)
 		self.assertIn('id="chatForm"', body)
 		self.assertIn('id="chatInput"', body)
 		self.assertIn('id="chatModel"', body)
@@ -138,9 +138,19 @@ class ApiContractsTests(TestCase):
 		response = self.client.get("/")
 		self.assertEqual(response.status_code, 200)
 		body = response.text
-		self.assertIn("Oversight Ops Control Room", body)
-		self.assertIn("Open Control Room", body)
+		self.assertIn("RTC Assistant Hub", body)
+		self.assertIn("Open Assistant", body)
 		self.assertIn('href="/app"', body)
+		self.assertIn('href="/learn"', body)
+
+	def test_learn_route_serves_career_coach_page(self) -> None:
+		response = self.client.get("/learn")
+		self.assertEqual(response.status_code, 200)
+		body = response.text
+		self.assertIn("RTC Coach", body)
+		self.assertIn('id="coachForm"', body)
+		self.assertIn('id="coachInput"', body)
+		self.assertIn('src="/app/learn.js"', body)
 
 	def test_assistant_respond_auto_mode_without_openai_key_falls_back_to_local(self) -> None:
 		previous_mode = os.environ.get("ASSISTANT_PROVIDER_MODE")

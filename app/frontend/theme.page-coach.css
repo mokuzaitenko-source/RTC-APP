@@ -1,0 +1,100 @@
+body[data-page="coach"] .hero {
+  border-top: 4px solid var(--brand);
+  display: grid;
+  gap: 8px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--surface-soft) 82%, black), color-mix(in srgb, var(--surface) 90%, black));
+}
+
+body[data-page="coach"] .layout {
+  display: grid;
+  grid-template-columns: 360px minmax(0, 1fr);
+  gap: var(--gap);
+}
+
+body[data-page="coach"] .stack {
+  display: grid;
+  gap: var(--gap);
+  align-content: start;
+}
+
+body[data-page="coach"] .tree {
+  margin: 10px 0 0;
+  padding-left: 18px;
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+
+body[data-page="coach"] .tree strong {
+  color: var(--ink);
+}
+
+body[data-page="coach"] .metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+body[data-page="coach"] .metric {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+  padding: 10px;
+  background: color-mix(in srgb, var(--surface-soft) 86%, black);
+}
+
+body[data-page="coach"] .metric p {
+  color: var(--ink-soft);
+  font-size: var(--text-xs);
+}
+
+body[data-page="coach"] .metric h3 {
+  margin-top: 4px;
+  font-size: 1.08rem;
+}
+
+body[data-page="coach"] .checklist {
+  margin-top: 10px;
+  display: grid;
+  gap: 7px;
+}
+
+body[data-page="coach"] .check {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface) 88%, black);
+  padding: 8px;
+  display: flex;
+  gap: 8px;
+  align-items: flex-start;
+  color: var(--ink-soft);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+}
+
+body[data-page="coach"] .thread {
+  max-height: min(64vh, 780px);
+  gap: 9px;
+}
+
+body[data-page="coach"] .chat-wrap .compose-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+@media (min-width: 1536px) {
+  body[data-page="coach"] .layout {
+    grid-template-columns: 390px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1180px) {
+  body[data-page="coach"] .layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 900px) {
+  body[data-page="coach"] .chat-wrap .compose-row {
+    grid-template-columns: 1fr;
+  }
+}

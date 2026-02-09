@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RTC Career Coach</title>
+  <link rel="icon" type="image/svg+xml" href="/app/favicon.svg">
+  <link rel="stylesheet" href="/app/theme.tokens.css">
+  <link rel="stylesheet" href="/app/theme.base.css">
+  <link rel="stylesheet" href="/app/theme.components.css">
+  <link rel="stylesheet" href="/app/theme.page-coach.css">
+</head>
+<body data-page="coach">
+  <main class="shell" aria-label="RTC Career Coach">
+    <section class="top-nav" aria-label="Global Navigation">
+      <p class="brand">RTC App</p>
+      <nav class="nav-links">
+        <a class="nav-link" href="/">Hub</a>
+        <a class="nav-link" href="/app">Assistant</a>
+        <a class="nav-link active" href="/learn" aria-current="page">Coach</a>
+      </nav>
+    </section>
+
+    <section class="panel hero">
+      <h1>RTC Coach</h1>
+      <p class="subtitle">Job-focused coaching loop with measurable daily output.</p>
+      <div class="toolbar">
+        <a class="primary" href="/app">Open Assistant</a>
+        <a href="/">Overview</a>
+        <button id="markUseful" type="button" title="Mark last response as useful">Mark Useful Reply</button>
+      </div>
+      <p id="coachStatus" class="status">Ready. Ask for your next 90-minute block.</p>
+    </section>
+
+    <section class="layout">
+      <aside class="stack">
+        <section class="panel">
+          <h2>Build Tree</h2>
+          <p class="subtitle">Stable base first, then scale with evidence.</p>
+          <ol class="tree">
+            <li><strong>Ground 0:</strong> Contracts, tests, deterministic errors.</li>
+            <li><strong>Ground 1:</strong> Conversation quality and low friction.</li>
+            <li><strong>Ground 2:</strong> Streaming reliability and continuity.</li>
+            <li><strong>Ground 3:</strong> Guardrails and clear fallbacks.</li>
+            <li><strong>Ground 4:</strong> Metrics tied to job outcomes.</li>
+          </ol>
+          <div class="metrics">
+            <div class="metric">
+              <p>Total Coaching Asks</p>
+              <h3 id="metricAsks">0</h3>
+            </div>
+            <div class="metric">
+              <p>Useful Replies</p>
+              <h3 id="metricUseful">0</h3>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <h2>Daily Loop</h2>
+          <p class="subtitle">Ship, measure, and interview every day.</p>
+          <div class="checklist">
+            <label class="check"><input data-role="coach-check" data-check-id="ship_fix" type="checkbox"> Ship one feature or fix with tests.</label>
+            <label class="check"><input data-role="coach-check" data-check-id="write_impact" type="checkbox"> Write one impact note with numbers.</label>
+            <label class="check"><input data-role="coach-check" data-check-id="practice_design" type="checkbox"> Practice one system design scenario.</label>
+            <label class="check"><input data-role="coach-check" data-check-id="apply_jobs" type="checkbox"> Apply to jobs and send outreach.</label>
+          </div>
+        </section>
+      </aside>
+
+      <section class="panel chat-wrap">
+        <div id="coachThread" class="thread" aria-live="polite"></div>
+        <form id="coachForm" class="composer">
+          <label for="coachInput">
+            Ask Your Coach
+            <textarea id="coachInput" placeholder="Example: Give me today's 90-minute job-prep block using my current app as portfolio proof."></textarea>
+          </label>
+          <div class="compose-row">
+            <label for="coachFocus">
+              Focus
+              <select id="coachFocus">
+                <option value="job_search">job search</option>
+                <option value="project_impact">project impact</option>
+                <option value="backend_skills">backend skills</option>
+                <option value="frontend_skills">frontend skills</option>
+                <option value="system_design">system design</option>
+                <option value="interview_prep">interview prep</option>
+              </select>
+            </label>
+            <div class="toolbar">
+              <button id="coachAsk" class="primary" type="submit">Ask Coach</button>
+              <button id="coachClear" type="button">Clear</button>
+            </div>
+          </div>
+          <div class="chip-row">
+            <p class="chip-label">Quick starts:</p>
+            <button class="chip ok" data-role="coach-prompt" data-prompt="Assess my current level and give me a 7-day plan with measurable outcomes." type="button">7-day assessment</button>
+            <button class="chip" data-role="coach-prompt" data-prompt="Give me one 90-minute session right now: 1 coding task, 1 test task, 1 system design task." type="button">90-min block</button>
+            <button class="chip warn" data-role="coach-prompt" data-prompt="Review my app like a hiring manager and tell me top 5 gaps to fix." type="button">hiring-manager review</button>
+          </div>
+        </form>
+      </section>
+    </section>
+  </main>
+
+  <script src="/app/learn.js"></script>
+</body>
+</html>

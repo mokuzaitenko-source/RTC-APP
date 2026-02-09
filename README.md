@@ -48,6 +48,12 @@ uvicorn app.backend.main:app --reload
 
 Open: `http://127.0.0.1:8000/app`
 
+One-command launcher (Windows):
+
+```powershell
+.\start_app.ps1
+```
+
 ## API Surface
 
 ### `POST /api/assistant/respond`

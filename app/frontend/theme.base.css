@@ -1,0 +1,44 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  min-height: 100vh;
+  color: var(--ink);
+  font-family: "Space Grotesk", "Avenir Next", "Segoe UI", sans-serif;
+  background:
+    radial-gradient(1000px 440px at 2% -6%, rgba(76, 199, 238, 0.22), transparent 60%),
+    radial-gradient(860px 420px at 98% -8%, rgba(255, 191, 115, 0.18), transparent 58%),
+    linear-gradient(180deg, var(--bg-0), var(--bg-1) 48%, var(--bg-2));
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+a,
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--brand) 75%, white);
+  outline-offset: 1px;
+}
+
+[hidden] {
+  display: none !important;
+}

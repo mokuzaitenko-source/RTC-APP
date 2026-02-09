@@ -142,6 +142,29 @@ class AssistantStreamTests(TestCase):
 		self.assertEqual(assistant.get("interaction_mode"), "conversation")
 		self.assertEqual(assistant.get("recommended_questions"), [])
 
+	def test_stream_enforces_requested_five_step_plan(self) -> None:
+		os.environ["ASSISTANT_PROVIDER_MODE"] = "local"
+		os.environ["ASSISTANT_OPENAI_MODELS"] = "gpt-4.1-mini"
+		with self.client.stream(
+			"POST",
+			"/api/assistant/stream",
+			json={
+				"user_input": "Turn my goal into a 5-step execution plan with acceptance checks.",
+				"model": "gpt-4.1-mini",
+			},
+		) as response:
+			self.assertEqual(response.status_code, 200)
+			raw = "".join(response.iter_text())
+		events = _parse_sse_events(raw)
+		done_data = next(data for name, data in events if name == "done")
+		assistant = done_data.get("assistant", {})
+		plan = assistant.get("plan")
+		self.assertIsInstance(plan, list)
+		self.assertEqual(len(plan), 5)
+		candidate = str(assistant.get("candidate_response", ""))
+		self.assertIn("5.", candidate)
+		self.assertNotIn("6.", candidate)
+
 	def test_stream_blocks_untrusted_tool_instruction(self) -> None:
 		os.environ["ASSISTANT_PROVIDER_MODE"] = "local"
 		os.environ["ASSISTANT_OPENAI_MODELS"] = "gpt-4.1-mini"
