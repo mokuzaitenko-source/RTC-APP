@@ -1,4 +1,4 @@
-# RTC-APP Case Study
+# RTC DevX Copilot Case Study
 
 ## 1) Problem
 

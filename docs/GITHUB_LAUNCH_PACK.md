@@ -1,8 +1,8 @@
-# GitHub Launch Pack: RTC-APP
+# GitHub Launch Pack: RTC DevX Copilot
 
 ## Repo Name
 
-`RTC-APP`
+`RTC DevX Copilot`
 
 ## Public Repo Description (short)
 
@@ -18,7 +18,7 @@ Full-stack AI assistant app with real-time responses, backend memory, and produc
 
 ## Recruiter Pitch (60 seconds)
 
-RTC-APP is an assistant-first web product that demonstrates practical LLM engineering patterns.  
+RTC DevX Copilot is an assistant-first web product that demonstrates practical LLM engineering patterns.  
 It includes streaming responses over SSE, session-aware memory on the server, model selection with backend allowlisting, and deterministic local behavior for repeatable tests.  
 The API remains backward-compatible through a non-stream endpoint while introducing a dedicated stream path for richer UX.
 

@@ -1,4 +1,4 @@
-# RTC-APP
+# RTC DevX Copilot
 
 Assistant-first platform focused on one real workflow:  
 `define problem -> generate plan -> implement -> verify -> refine`
@@ -15,7 +15,7 @@ Most assistant UIs are broad but not practical for daily engineering execution.
 The goal here was to build something usable every day for real build/debug loops, not a demo chat screen.
 
 ### Solution
-RTC-APP ships a single runtime surface (`/app`) with:
+RTC DevX Copilot ships a single runtime surface (`/app`) with:
 - streaming assistant responses (SSE)
 - session continuity across refreshes
 - strict `3+1+1` execution outputs for build/debug prompts
@@ -50,7 +50,7 @@ RTC-APP ships a single runtime surface (`/app`) with:
 
 ## Recruiter Snapshot
 
-RTC-APP is a full-stack AI product implementation, not just UI polish.
+RTC DevX Copilot is a full-stack AI product implementation, not just UI polish.
 It demonstrates production-minded API contracts, streaming transport, memory discipline, fallback safety, and iterative product simplification.
 
 ## Resume Bullets (Copy/Paste Ready)

@@ -25,8 +25,8 @@ if (-not $NoReload) {
     $uvicornArgs += "--reload"
 }
 
-$url = "http://127.0.0.1:$Port/learn"
-Write-Host "Starting RTC-APP on $url" -ForegroundColor Cyan
+$url = "http://127.0.0.1:$Port/app"
+Write-Host "Starting RTC DevX Copilot on $url" -ForegroundColor Cyan
 Write-Host "Press Ctrl+C to stop the server." -ForegroundColor DarkGray
 
 if (-not $NoBrowser) {

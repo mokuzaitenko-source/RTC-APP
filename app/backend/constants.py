@@ -3,7 +3,7 @@ DEFAULT_MATRIX_PATH = "docs/requirements_trace_matrix.md"
 DEFAULT_PLAYBOOK_PATH = "docs/patch_playbook.md"
 DEFAULT_HANDOFF_PATH = "SESSION_HANDOFF.md"
 DEFAULT_DB_PATH = "oversight_state.db"
-APP_NAME = "Oversight Ops App"
+APP_NAME = "RTC DevX Copilot"
 APP_VERSION = "1.0.0"
 DEFAULT_CORS_ALLOW_ORIGINS = [
 	"http://localhost",

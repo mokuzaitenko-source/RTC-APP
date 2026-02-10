@@ -226,7 +226,7 @@ def build_iteration_prompt(
     title = technique_entry["title"]
     technique = technique_entry["technique"]
     return (
-        "You are improving RTC-APP in an autonomous engineering loop.\n"
+        "You are improving RTC DevX Copilot in an autonomous engineering loop.\n"
         f"Cycle: {cycle}\n"
         f"Prompt-book technique: {technique} (from {title})\n"
         f"Current weakest dimension: {weakest_dimension}\n"
@@ -312,7 +312,7 @@ def generate_improvement_proposal(*, prompt: str, model: str, dry_run: bool) -> 
     try:
         client = OpenAI(api_key=api_key, timeout=30.0)
         system_prompt = (
-            "You are a senior software engineer optimizing RTC-APP. "
+            "You are a senior software engineer optimizing RTC DevX Copilot. "
             "Return strict JSON only. Do not include markdown."
         )
         response = client.responses.create(
@@ -1377,7 +1377,7 @@ def run_autoloop(
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Prompt-book-driven autonomous improvement loop for RTC-APP.",
+        description="Prompt-book-driven autonomous improvement loop for RTC DevX Copilot.",
     )
     parser.add_argument("--iterations", type=int, default=100)
     parser.add_argument("--prompt-book", default=str(DEFAULT_PROMPT_BOOK))

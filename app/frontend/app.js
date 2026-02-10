@@ -15,8 +15,10 @@ const state = {
     pending: "",
     workflow_mode: "build",
     risk_tolerance: "medium",
-    api_version: "v1",
+    api_version: "v2",
     output_format: "default",
+    tone_preference: "focused",
+    last_interaction_mode: "task",
     model: "",
     models: [],
     aca_trace_enabled: false,
@@ -45,11 +47,31 @@ function setStatus(text) {
   }
 }
 
-function renderApiVersionUi() {
-  const select = document.getElementById("chatApiVersion");
-  if (select) {
-    select.value = state.chat.api_version;
+function setErrorBanner(message) {
+  const banner = document.getElementById("assistantErrorBanner");
+  const text = document.getElementById("assistantErrorText");
+  if (!banner || !text) {
+    return;
   }
+  const cleaned = String(message || "").trim();
+  if (!cleaned) {
+    banner.hidden = true;
+    text.textContent = "";
+    return;
+  }
+  text.textContent = cleaned;
+  banner.hidden = false;
+}
+
+function renderModeBadge() {
+  const badge = document.getElementById("assistantModeBadge");
+  if (!badge) {
+    return;
+  }
+  const mode = state.chat.last_interaction_mode === "conversation" ? "Chat" : "Task";
+  badge.textContent = `Mode: ${mode}`;
+  badge.classList.toggle("ok", mode === "Task");
+  badge.classList.toggle("warning", mode !== "Task");
 }
 
 function renderProviderStatus() {
@@ -73,7 +95,6 @@ function renderProviderStatus() {
 
 function renderWorkflowUi() {
   const workflow = state.chat.workflow_mode === "debug" ? "debug" : "build";
-  const hasAssistantResponse = state.chat.messages.some(message => message.role === "assistant");
 
   const workflowSelect = document.getElementById("chatWorkflow");
   if (workflowSelect) {
@@ -86,57 +107,6 @@ function renderWorkflowUi() {
       input.placeholder = "Issue: what is failing?\nExpected: what should happen?\nActual: what happens now?\nConstraints/Deadline: what must be respected?";
     } else {
       input.placeholder = "Goal: what do you want shipped?\nConstraints: scope/tools/time?\nDeadline: when does it need to be done?\nDone when: what result proves success?";
-    }
-  }
-
-  const chipPrimary = document.getElementById("promptChipPrimary");
-  const chipSecondary = document.getElementById("promptChipSecondary");
-
-  if (workflow === "debug") {
-    if (chipPrimary) {
-      chipPrimary.textContent = "Debug now";
-      chipPrimary.setAttribute(
-        "data-prompt",
-        "Debug this issue in strict format: 3 actions, 1 verification, 1 fallback."
-      );
-    }
-    if (chipSecondary) {
-      if (hasAssistantResponse) {
-        chipSecondary.textContent = "Harden regression";
-        chipSecondary.setAttribute(
-          "data-prompt",
-          "Refine your previous debug answer with stronger regression checks and a safer fallback, while keeping strict 3+1+1."
-        );
-      } else {
-        chipSecondary.textContent = "Capture signals";
-        chipSecondary.setAttribute(
-          "data-prompt",
-          "Give me the first debug signals to capture, then provide a strict 3+1+1 debug plan."
-        );
-      }
-    }
-  } else {
-    if (chipPrimary) {
-      chipPrimary.textContent = "Strict 3+1+1";
-      chipPrimary.setAttribute(
-        "data-prompt",
-        "Turn this into a strict execution plan with 3 actions, 1 verification, and 1 fallback."
-      );
-    }
-    if (chipSecondary) {
-      if (hasAssistantResponse) {
-        chipSecondary.textContent = "Refine previous";
-        chipSecondary.setAttribute(
-          "data-prompt",
-          "Refine your previous answer to tighten acceptance checks and lower-risk fallback while keeping strict 3+1+1."
-        );
-      } else {
-        chipSecondary.textContent = "Scope quickly";
-        chipSecondary.setAttribute(
-          "data-prompt",
-          "Ask me one clarifying question if needed, then return a strict 3+1+1 plan."
-        );
-      }
     }
   }
 }
@@ -187,8 +157,7 @@ function loadState() {
           role: item.role === "user" ? "user" : "assistant",
           text: String(item.text || "").trim(),
           created_at: String(item.created_at || ""),
-          message_id: String(item.message_id || ""),
-          useful: item.useful === "yes" || item.useful === "no" ? item.useful : null
+          message_id: String(item.message_id || "")
         }))
         .filter(item => Boolean(item.text))
         .slice(-MAX_MESSAGES);
@@ -200,7 +169,7 @@ function loadState() {
         : "medium";
       state.chat.api_version = ["v1", "v2"].includes(parsed.chat.api_version)
         ? parsed.chat.api_version
-        : "v1";
+        : "v2";
       state.chat.output_format = [
         "default",
         "concise_plan",
@@ -209,6 +178,12 @@ function loadState() {
       ].includes(parsed.chat.output_format)
         ? parsed.chat.output_format
         : "default";
+      state.chat.tone_preference = ["focused", "friendly", "direct"].includes(parsed.chat.tone_preference)
+        ? parsed.chat.tone_preference
+        : "focused";
+      state.chat.last_interaction_mode = parsed.chat.last_interaction_mode === "conversation"
+        ? "conversation"
+        : "task";
       state.chat.model = typeof parsed.chat.model === "string" ? parsed.chat.model : "";
       state.chat.aca_trace_enabled = typeof parsed.chat.aca_trace_enabled === "boolean"
         ? parsed.chat.aca_trace_enabled
@@ -222,8 +197,10 @@ function loadState() {
     state.chat.messages = [];
     state.chat.workflow_mode = "build";
     state.chat.risk_tolerance = "medium";
-    state.chat.api_version = "v1";
+    state.chat.api_version = "v2";
     state.chat.output_format = "default";
+    state.chat.tone_preference = "focused";
+    state.chat.last_interaction_mode = "task";
     state.chat.model = "";
     state.chat.aca_trace_enabled = false;
     state.chat.last_trace = [];
@@ -241,6 +218,8 @@ function persistState() {
       risk_tolerance: state.chat.risk_tolerance,
       api_version: state.chat.api_version,
       output_format: state.chat.output_format,
+      tone_preference: state.chat.tone_preference,
+      last_interaction_mode: state.chat.last_interaction_mode,
       model: state.chat.model,
       aca_trace_enabled: state.chat.aca_trace_enabled,
       last_trace: state.chat.last_trace
@@ -258,6 +237,10 @@ function syncBusyUi() {
       button.removeAttribute("disabled");
     }
   });
+  const busyBadge = document.getElementById("assistantBusyBadge");
+  if (busyBadge) {
+    busyBadge.hidden = !state.busy;
+  }
 }
 
 async function runWithBusy(label, fn) {
@@ -266,6 +249,7 @@ async function runWithBusy(label, fn) {
   }
   state.busy = true;
   setStatus(label);
+  setErrorBanner("");
   syncBusyUi();
   let ok = false;
   try {
@@ -290,13 +274,9 @@ function renderChat() {
   const items = [];
   for (const message of state.chat.messages) {
     const messageId = escapeHtml(message.message_id || "");
-    const usefulYesClass = message.useful === "yes" ? " active" : "";
-    const usefulNoClass = message.useful === "no" ? " active" : "";
     const assistantActions = message.role === "assistant"
       ? `
       <div class="bubble-actions">
-        <button type="button" class="mini-btn${usefulYesClass}" data-role="feedback" data-mid="${messageId}" data-value="yes">Useful</button>
-        <button type="button" class="mini-btn${usefulNoClass}" data-role="feedback" data-mid="${messageId}" data-value="no">Needs work</button>
         <button type="button" class="mini-btn" data-role="refine" data-mid="${messageId}">Refine this</button>
       </div>
       `
@@ -324,8 +304,13 @@ function renderChat() {
   if (!items.length) {
     thread.innerHTML = `
       <div class="empty">
-        Start by describing what you want to build, fix, or plan.
-        The assistant will stream a response and keep session context.
+        <strong>Welcome.</strong> Describe what you want to build, fix, or decide.
+        <div class="empty-sub">Try one of these:</div>
+        <ul>
+          <li>Build: "Ship a 2-week MVP plan with acceptance checks."</li>
+          <li>Debug: "Fix a flaky test that fails on CI only."</li>
+          <li>Decide: "Choose between two API designs with risks."</li>
+        </ul>
       </div>
     `;
   } else {
@@ -345,7 +330,11 @@ function renderChat() {
   if (formatPreset) {
     formatPreset.value = state.chat.output_format;
   }
-  renderApiVersionUi();
+  const tone = document.getElementById("chatTone");
+  if (tone) {
+    tone.value = state.chat.tone_preference || "focused";
+  }
+  renderModeBadge();
   renderWorkflowUi();
 }
 
@@ -398,6 +387,13 @@ function renderAdvancedDrawer() {
   }
 }
 
+function openAdvancedDrawer() {
+  state.ui.advanced_open = true;
+  persistState();
+  renderAdvancedDrawer();
+  setStatus("Advanced settings opened.");
+}
+
 function pushMessage(role, text) {
   const cleaned = String(text || "").trim();
   if (!cleaned) {
@@ -410,31 +406,11 @@ function pushMessage(role, text) {
     role: role === "user" ? "user" : "assistant",
     text: cleaned,
     created_at: new Date().toISOString(),
-    message_id: messageId,
-    useful: null
+    message_id: messageId
   });
   state.chat.messages = state.chat.messages.slice(-MAX_MESSAGES);
   persistState();
   renderChat();
-}
-
-function setMessageFeedback(messageId, useful) {
-  if (!messageId || (useful !== "yes" && useful !== "no")) {
-    return;
-  }
-  let updated = false;
-  state.chat.messages = state.chat.messages.map(message => {
-    if (message.message_id !== messageId || message.role !== "assistant") {
-      return message;
-    }
-    updated = true;
-    return { ...message, useful };
-  });
-  if (updated) {
-    persistState();
-    renderChat();
-    setStatus(useful === "yes" ? "Marked as useful." : "Marked as needs work.");
-  }
 }
 
 function buildRefinePrompt(messageId) {
@@ -475,6 +451,31 @@ function presetInstruction() {
     return "Return a debugging checklist with hypotheses, checks, and expected signals.";
   }
   return "";
+}
+
+function isConversationalPrompt(prompt) {
+  const cleaned = String(prompt || "").trim().toLowerCase();
+  if (!cleaned) {
+    return true;
+  }
+  const phrases = [
+    "what's up",
+    "whats up",
+    "how are you",
+    "can we chat",
+    "just chatting"
+  ];
+  if (phrases.some(phrase => cleaned.includes(phrase))) {
+    return true;
+  }
+  const tokens = cleaned.split(/\s+/).filter(Boolean);
+  if (tokens.length <= 3) {
+    const shortGreetings = new Set(["hi", "hello", "hey", "yo", "sup", "thanks", "thank"]); 
+    if (tokens.some(token => shortGreetings.has(token))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function workflowInstruction() {
@@ -609,11 +610,15 @@ function buildRequestPayload(prompt) {
   if (context) {
     contextParts.push(context);
   }
-  if (workflowHint) {
+  const conversational = isConversationalPrompt(prompt);
+  if (workflowHint && !conversational) {
     contextParts.push(`Workflow directive: ${workflowHint}`);
   }
-  if (formatHint) {
+  if (formatHint && !conversational) {
     contextParts.push(`Output format requirement: ${formatHint}`);
+  }
+  if (!conversational && state.chat.tone_preference && state.chat.tone_preference !== "focused") {
+    contextParts.push(`Tone preference: ${state.chat.tone_preference}.`);
   }
   const payload = {
     user_input: prompt,
@@ -822,6 +827,10 @@ async function askAssistant() {
     throw new Error("Type a message before asking the assistant.");
   }
 
+  state.chat.last_interaction_mode = isConversationalPrompt(prompt) ? "conversation" : "task";
+  persistState();
+  renderModeBadge();
+
   pushMessage("user", prompt);
   input.value = "";
   if (state.chat.aca_trace_enabled) {
@@ -875,6 +884,7 @@ function setHelpOpen(open) {
 function handleError(error) {
   const message = error?.message || "Unknown error.";
   setStatus(`Error: ${message}`);
+  setErrorBanner(message);
   state.chat.pending = "";
   renderChat();
   pushMessage("assistant", `I hit an error: ${message}`);
@@ -882,16 +892,21 @@ function handleError(error) {
 }
 
 function onGlobalKeydown(event) {
-  if (event.key !== "Escape") {
+  const openAdvancedHotkey = (event.ctrlKey || event.metaKey) && (event.key === "." || event.code === "Period");
+  if (openAdvancedHotkey) {
+    event.preventDefault();
+    openAdvancedDrawer();
     return;
   }
-  if (state.ui.advanced_open) {
-    state.ui.advanced_open = false;
-    persistState();
-    renderAdvancedDrawer();
-  }
-  if (state.helpOpen) {
-    setHelpOpen(false);
+  if (event.key === "Escape") {
+    if (state.ui.advanced_open) {
+      state.ui.advanced_open = false;
+      persistState();
+      renderAdvancedDrawer();
+    }
+    if (state.helpOpen) {
+      setHelpOpen(false);
+    }
   }
 }
 
@@ -908,6 +923,14 @@ function wire() {
   const assistantOpenHelp = document.getElementById("assistantOpenHelp");
   if (assistantOpenHelp) {
     assistantOpenHelp.addEventListener("click", () => setHelpOpen(true));
+  }
+
+  const assistantOpenAdvancedFromHelp = document.getElementById("assistantOpenAdvancedFromHelp");
+  if (assistantOpenAdvancedFromHelp) {
+    assistantOpenAdvancedFromHelp.addEventListener("click", () => {
+      setHelpOpen(false);
+      openAdvancedDrawer();
+    });
   }
 
   const closeHelp = document.getElementById("closeHelp");
@@ -930,19 +953,6 @@ function wire() {
       event.preventDefault();
       runWithBusy("Assistant is thinking...", askAssistant);
     });
-    chatForm.addEventListener("click", event => {
-      const button = event.target.closest("button[data-role='chat-prompt']");
-      if (!button) {
-        return;
-      }
-      const prompt = button.getAttribute("data-prompt") || "";
-      const input = document.getElementById("chatInput");
-      if (!input) {
-        return;
-      }
-      input.value = prompt;
-      input.focus();
-    });
     const chatInput = document.getElementById("chatInput");
     if (chatInput) {
       chatInput.addEventListener("keydown", event => {
@@ -963,11 +973,6 @@ function wire() {
       }
       const role = button.getAttribute("data-role");
       const messageId = button.getAttribute("data-mid") || "";
-      if (role === "feedback") {
-        const value = button.getAttribute("data-value");
-        setMessageFeedback(messageId, value === "yes" ? "yes" : "no");
-        return;
-      }
       if (role === "refine") {
         const input = document.getElementById("chatInput");
         if (!input) {
@@ -975,7 +980,7 @@ function wire() {
         }
         input.value = buildRefinePrompt(messageId);
         input.focus();
-        runWithBusy("Refining response...", askAssistant);
+        setStatus("Refinement prompt prepared. Press Ask to run.");
       }
     });
   }
@@ -1018,15 +1023,6 @@ function wire() {
     });
   }
 
-  const apiVersion = document.getElementById("chatApiVersion");
-  if (apiVersion) {
-    apiVersion.addEventListener("change", () => {
-      state.chat.api_version = apiVersion.value === "v2" ? "v2" : "v1";
-      persistState();
-      renderApiVersionUi();
-    });
-  }
-
   const formatPreset = document.getElementById("chatFormatPreset");
   if (formatPreset) {
     formatPreset.addEventListener("change", () => {
@@ -1034,6 +1030,15 @@ function wire() {
       state.chat.output_format = allowed.includes(formatPreset.value)
         ? formatPreset.value
         : "default";
+      persistState();
+    });
+  }
+
+  const tone = document.getElementById("chatTone");
+  if (tone) {
+    tone.addEventListener("change", () => {
+      const allowed = ["focused", "friendly", "direct"];
+      state.chat.tone_preference = allowed.includes(tone.value) ? tone.value : "focused";
       persistState();
     });
   }
@@ -1061,6 +1066,7 @@ async function init() {
   renderTrace();
   renderAdvancedDrawer();
   renderWorkflowUi();
+  renderModeBadge();
   await runWithBusy("Loading model catalog...", loadModels);
 }
 

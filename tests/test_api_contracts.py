@@ -138,7 +138,7 @@ class ApiContractsTests(TestCase):
 		response = self.client.get("/app")
 		self.assertEqual(response.status_code, 200)
 		body = response.text
-		self.assertIn("RTC Assistant", body)
+		self.assertIn("RTC DevX Copilot", body)
 		self.assertIn('id="chatForm"', body)
 		self.assertIn('id="chatInput"', body)
 		self.assertIn('id="chatModel"', body)

@@ -26,7 +26,7 @@ class Dev3Strategist:
         upgrade: UpgradeSpec,
     ) -> str:
         return (
-            "You are Dev3 (Strategist/Researcher) for RTC-APP autoloop.\n"
+            "You are Dev3 (Strategist/Researcher) for RTC DevX Copilot autoloop.\n"
             f"Cycle: {cycle}\n"
             f"Upgrade target: {upgrade.upgrade_id} - {upgrade.goal}\n"
             f"Technique: {technique}\n"
