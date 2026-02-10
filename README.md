@@ -53,11 +53,7 @@ RTC DevX Copilot ships a single runtime surface (`/app`) with:
 RTC DevX Copilot is a full-stack AI product implementation, not just UI polish.
 It demonstrates production-minded API contracts, streaming transport, memory discipline, fallback safety, and iterative product simplification.
 
-## Resume Bullets (Copy/Paste Ready)
 
-- Built an assistant-first FastAPI platform that streams responses (SSE), preserves session context, and supports model/risk controls for practical software workflows.
-- Implemented provider abstraction (local deterministic + OpenAI) with controlled error envelopes, timeout handling, and compatibility-preserving v1/v2 APIs.
-- Improved product focus by reducing runtime surface to one assistant workflow, while documenting architecture and evidence as a GitHub case study.
 
 ## Case Study Document
 
