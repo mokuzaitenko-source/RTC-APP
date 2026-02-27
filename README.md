@@ -1,4 +1,7 @@
-# RTC DevX Copilot
+﻿# RTC DevX Copilot
+
+![Status](https://img.shields.io/badge/status-active-2ea44f)
+**Repo Type:** product
 
 Assistant-first platform focused on one real workflow:  
 `define problem -> generate plan -> implement -> verify -> refine`
@@ -41,6 +44,21 @@ RTC DevX Copilot ships a single runtime surface (`/app`) with:
 - reduced UI clutter while preserving power controls in advanced drawer
 - repository narrative aligned for GitHub/job showcase
 
+## Try It In 60 Seconds
+
+1. Open `/app`.
+2. Pick `Build` or `Debug`.
+3. Paste one concrete prompt:
+   - Build: `Ship a 2-week MVP plan with milestones, checks, and fallback.`
+   - Debug: `Debug flaky test failures, isolate root cause, and propose safe patch order.`
+4. Click `Ask`.
+5. Execute step 1 immediately, then click `Refine this` for the next pass.
+
+You should get a strict operational shape:
+- 3 next actions
+- 1 verification step
+- 1 fallback step
+
 ## Runtime Scope
 
 - Runtime product surface: `/app` only
@@ -53,7 +71,11 @@ RTC DevX Copilot ships a single runtime surface (`/app`) with:
 RTC DevX Copilot is a full-stack AI product implementation, not just UI polish.
 It demonstrates production-minded API contracts, streaming transport, memory discipline, fallback safety, and iterative product simplification.
 
+## Resume Bullets (Copy/Paste Ready)
 
+- Built an assistant-first FastAPI platform that streams responses (SSE), preserves session context, and supports model/risk controls for practical software workflows.
+- Implemented provider abstraction (local deterministic + OpenAI) with controlled error envelopes, timeout handling, and compatibility-preserving v1/v2 APIs.
+- Improved product focus by reducing runtime surface to one assistant workflow, while documenting architecture and evidence as a GitHub case study.
 
 ## Case Study Document
 
@@ -68,11 +90,17 @@ uvicorn app.backend.main:app --reload
 
 Open: `http://127.0.0.1:8000/app`
 
+Local startup reads `.env` automatically if present (without overriding already-exported environment variables).
+
 One-command launcher (Windows):
 
 ```powershell
 .\start_app.ps1
 ```
+
+Launcher behavior:
+- default forces `ASSISTANT_PROVIDER_MODE=local` for no-key daily use
+- pass `-Cloud` if you explicitly want cloud/provider-configured mode
 
 ## API Surface
 
@@ -286,3 +314,4 @@ python scripts/package_aca_docs.py
 
 For repo description, topics, and a longer interview pitch, use:
 `docs/GITHUB_LAUNCH_PACK.md`
+
